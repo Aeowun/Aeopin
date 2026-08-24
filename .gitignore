@@ -1,0 +1,22 @@
+# Gradle
+.gradle/
+build/
+.kotlin/
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# Planning & Local Data
+.artifacts/
+
+# Log files
+*.log
+output.txt
+
+# OS generated files
+.DS_Store
+Thumbs.db
