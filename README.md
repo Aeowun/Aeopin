@@ -6,6 +6,17 @@ If you have a file, a folder, some text, or a link you need to save fast, drop i
 
 ## Current Status
 
+"A mechanic gets pissed at a machine and can at least physically attack the problem:
+
+"WHY THE FUCK ARE YOU DOING THAT?"
+[wrench]
+
+Software gives you:
+
+NullPointerException
+
+and your only available wrench is a $150 keyboard."
+
 > [!CAUTION]
 > **Internal Beta.**
 >
