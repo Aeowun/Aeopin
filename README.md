@@ -1,8 +1,8 @@
 # AEOPIN
 
-AEOPIN is a Windows capture tool built for one thing: **Drop first, organize later.**
+AEOPIN is a Windows capture tool.**
 
-If you have a file, a folder, some text, or a link you need to save fast, just drop it in. AEOPIN moves it to a secure local vault, deduplicates it, and makes it searchable. No cloud, no tracking, just local storage.
+If you have a file, a folder, some text, or a link you need to save fast, drop it in AEOPIN. It moves it to a secure local vault, and makes it searchable. No cloud, no tracking, just local storage.
 
 ## Current Status
 
