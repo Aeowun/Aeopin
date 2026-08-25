@@ -356,17 +356,27 @@ fn main() -> Result<(), slint::PlatformError> {
                 let ui_weak = ui_handle.clone();
                 let state_mon = state_clone.clone();
                 thread::spawn(move || {
+                    let start_time = std::time::Instant::now();
                     let wait_res = {
                         let mut child = child_arc.lock().unwrap();
                         child.wait()
                     };
+                    let duration = start_time.elapsed();
 
                     let mut s = state_mon.lock().unwrap();
                     s.child_process = None;
 
+                    let is_short_lived = duration < std::time::Duration::from_secs(5);
                     let last_err = match &wait_res {
-                        Ok(status) if !status.success() => Some(format!("Exit status: {}", status)),
+                        Ok(status) if !status.success() || is_short_lived => {
+                            if is_short_lived {
+                                Some(format!("Application crashed on startup ({}s). Check logs.", duration.as_secs()))
+                            } else {
+                                Some(format!("Exit status: {}", status))
+                            }
+                        },
                         Err(e) => Some(e.to_string()),
+                        _ if is_short_lived => Some(format!("Application closed unexpectedly after {}s.", duration.as_secs())),
                         _ => None,
                     };
                     if let Some(err) = last_err.clone() {
@@ -376,18 +386,17 @@ fn main() -> Result<(), slint::PlatformError> {
                     slint::invoke_from_event_loop(move || {
                         if let Some(ui) = ui_weak.upgrade() {
                             match wait_res {
-                                Ok(status) => {
+                                Ok(status) if status.success() && !is_short_lived => {
                                     ui.set_state(slint::format!("installed"));
-                                    if status.success() {
-                                        ui.set_status_text(slint::format!("AEOPIN exited normally."));
-                                    } else {
-                                        ui.set_state(slint::format!("error"));
-                                        ui.set_status_text(slint::format!("AEOPIN exited with error: {}", status));
-                                    }
+                                    ui.set_status_text(slint::format!("AEOPIN exited normally."));
                                 }
-                                Err(e) => {
+                                _ => {
                                     ui.set_state(slint::format!("error"));
-                                    ui.set_status_text(slint::format!("Monitor error: {}", e));
+                                    if is_short_lived {
+                                        ui.set_status_text(slint::format!("AEOPIN crashed on startup."));
+                                    } else {
+                                        ui.set_status_text(slint::format!("AEOPIN stopped unexpectedly."));
+                                    }
                                 }
                             }
                         }

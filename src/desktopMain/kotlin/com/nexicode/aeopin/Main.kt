@@ -53,179 +53,185 @@ sealed class UiStorageState {
 }
 
 fun main() = application {
-    // SINGLE INSTANCE LOCK
-    val lockSocket = try {
-        java.net.ServerSocket(49152)
-    } catch (e: Exception) {
-        return@application
-    }
-
-    val koinApp = remember {
-        startKoin {
-            modules(appModule)
+    try {
+        // SINGLE INSTANCE LOCK
+        val lockSocket = try {
+            java.net.ServerSocket(49152)
+        } catch (e: Exception) {
+            return@application
         }
-    }
-    
-    val vaultService = koinApp.koin.get<VaultService>()
-    val settingsManager = koinApp.koin.get<SettingsManager>()
 
-    var isVisible by remember { mutableStateOf(true) }
-    var windowActive by remember { mutableStateOf(true) }
-    var storageState by remember { mutableStateOf<UiStorageState>(UiStorageState.Idle) }
-    var searchQuery by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
-
-    val hotkeyManager = remember { GlobalHotkeyManager { isVisible = !isVisible } }
-
-    LaunchedEffect(Unit) {
-        vaultService.startScavenger()
-        hotkeyManager.init()
-    }
-
-    // THE "WINK" ANIMATION (Vertical Shrink)
-    val winkProgress = remember { Animatable(0f) }
-    LaunchedEffect(isVisible) {
-        if (isVisible) {
-            windowActive = true
-            winkProgress.animateTo(1f, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow))
-        } else {
-            winkProgress.animateTo(0f, tween(250, easing = FastOutSlowInEasing))
-            windowActive = false
-        }
-    }
-
-    Tray(
-        icon = painterResource("icon.ico"),
-        tooltip = "DROP",
-        onAction = { isVisible = true },
-        menu = {
-            Item("Show", onClick = { isVisible = true })
-            Item("Exit", onClick = { exitApplication() })
-        }
-    )
-
-    if (windowActive) {
-        Dialog(
-            onCloseRequest = { isVisible = false },
-            state = rememberDialogState(
-                width = 340.dp,
-                height = 520.dp,
-                position = WindowPosition(Alignment.Center)
-            ),
-            title = "DROP",
-            undecorated = true,
-            transparent = true,
-            resizable = false
-        ) {
-            // Dialogs are hidden from taskbar by default on Windows
-            LaunchedEffect(window) {
-                window.isAlwaysOnTop = true
+        val koinApp = remember {
+            startKoin {
+                modules(appModule)
             }
+        }
+        
+        val vaultService = koinApp.koin.get<VaultService>()
+        val settingsManager = koinApp.koin.get<SettingsManager>()
 
-            val windowInfo = LocalWindowInfo.current
-            val isFocused = windowInfo.isWindowFocused
-            val isDraggingOver = storageState is UiStorageState.Dragging
-            
-            val opacity by animateFloatAsState(
-                targetValue = if (isFocused || isDraggingOver) 1.0f else 0.95f,
-                animationSpec = tween(200)
-            )
+        var isVisible by remember { mutableStateOf(true) }
+        var windowActive by remember { mutableStateOf(true) }
+        var storageState by remember { mutableStateOf<UiStorageState>(UiStorageState.Idle) }
+        var searchQuery by remember { mutableStateOf("") }
+        val scope = rememberCoroutineScope()
 
-            LaunchedEffect(window) {
-                DropTarget(window, DesktopDropAdapter(
-                    vaultService = vaultService,
-                    scope = scope,
-                    onDragStateChange = { if (it) storageState = UiStorageState.Dragging else if (storageState == UiStorageState.Dragging) storageState = UiStorageState.Idle },
-                    onStorageStarted = { },
-                    onStorageSuccess = { label ->
-                        scope.launch {
-                            storageState = UiStorageState.Success(label)
-                            delay(2000)
-                            storageState = UiStorageState.Idle
-                        }
-                    },
-                    onStorageError = { msg ->
-                        scope.launch {
-                            storageState = UiStorageState.Error(msg)
-                            delay(3000)
-                            storageState = UiStorageState.Idle
-                        }
-                    }
-                ))
+        val hotkeyManager = remember { GlobalHotkeyManager { isVisible = !isVisible } }
+
+        LaunchedEffect(Unit) {
+            vaultService.startScavenger()
+            hotkeyManager.init()
+        }
+
+        // THE "WINK" ANIMATION (Vertical Shrink)
+        val winkProgress = remember { Animatable(0f) }
+        LaunchedEffect(isVisible) {
+            if (isVisible) {
+                windowActive = true
+                winkProgress.animateTo(1f, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow))
+            } else {
+                winkProgress.animateTo(0f, tween(250, easing = FastOutSlowInEasing))
+                windowActive = false
             }
+        }
 
-            AeopinTheme {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            // VERTICAL WINK EFFECT
-                            scaleY = winkProgress.value
-                            alpha = winkProgress.value
-                            scaleX = 0.95f + (0.05f * winkProgress.value)
-                            transformOrigin = androidx.compose.ui.graphics.TransformOrigin.Center
-                        }
-                        .border(
-                            width = 1.dp,
-                            brush = Brush.verticalGradient(
-                                listOf(
-                                    if (isFocused) AeopinTurquoise.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.12f),
-                                    Color.Transparent
-                                )
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        .clip(RoundedCornerShape(12.dp)),
-                    color = AeopinMidnight.copy(alpha = opacity)
-                ) {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        WindowDraggableArea {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(44.dp)
-                                    .padding(horizontal = 16.dp),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(12.dp)
-                                            .background(AeopinTurquoise, CircleShape)
-                                            .shadow(6.dp, CircleShape)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        "DROP",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = Color.White.copy(alpha = 0.5f)
-                                    )
-                                }
+        Tray(
+            icon = painterResource("icon.ico"),
+            tooltip = "DROP",
+            onAction = { isVisible = true },
+            menu = {
+                Item("Show", onClick = { isVisible = true })
+                Item("Exit", onClick = { exitApplication() })
+            }
+        )
+
+        if (windowActive) {
+            Dialog(
+                onCloseRequest = { isVisible = false },
+                state = rememberDialogState(
+                    width = 340.dp,
+                    height = 520.dp,
+                    position = WindowPosition(Alignment.Center)
+                ),
+                title = "DROP",
+                undecorated = true,
+                transparent = true,
+                resizable = false
+            ) {
+                // Dialogs are hidden from taskbar by default on Windows
+                LaunchedEffect(window) {
+                    window.isAlwaysOnTop = true
+                }
+
+                val windowInfo = LocalWindowInfo.current
+                val isFocused = windowInfo.isWindowFocused
+                val isDraggingOver = storageState is UiStorageState.Dragging
+                
+                val opacity by animateFloatAsState(
+                    targetValue = if (isFocused || isDraggingOver) 1.0f else 0.95f,
+                    animationSpec = tween(200)
+                )
+
+                LaunchedEffect(window) {
+                    DropTarget(window, DesktopDropAdapter(
+                        vaultService = vaultService,
+                        scope = scope,
+                        onDragStateChange = { if (it) storageState = UiStorageState.Dragging else if (storageState == UiStorageState.Dragging) storageState = UiStorageState.Idle },
+                        onStorageStarted = { },
+                        onStorageSuccess = { label ->
+                            scope.launch {
+                                storageState = UiStorageState.Success(label)
+                                delay(2000)
+                                storageState = UiStorageState.Idle
+                            }
+                        },
+                        onStorageError = { msg ->
+                            scope.launch {
+                                storageState = UiStorageState.Error(msg)
+                                delay(3000)
+                                storageState = UiStorageState.Idle
                             }
                         }
+                    ))
+                }
 
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 16.dp)
-                                .padding(bottom = 16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            StorageAppliance(storageState)
-                            
-                            Spacer(modifier = Modifier.height(28.dp))
-                            
-                            SearchScreen(
-                                modifier = Modifier.weight(1f),
-                                searchQuery = searchQuery,
-                                onSearchQueryChange = { searchQuery = it },
-                                window = window
+                AeopinTheme {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                // VERTICAL WINK EFFECT
+                                scaleY = winkProgress.value
+                                alpha = winkProgress.value
+                                scaleX = 0.95f + (0.05f * winkProgress.value)
+                                transformOrigin = androidx.compose.ui.graphics.TransformOrigin.Center
+                            }
+                            .border(
+                                width = 1.dp,
+                                brush = Brush.verticalGradient(
+                                    listOf(
+                                        if (isFocused) AeopinTurquoise.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.12f),
+                                        Color.Transparent
+                                    )
+                                ),
+                                shape = RoundedCornerShape(12.dp)
                             )
+                            .clip(RoundedCornerShape(12.dp)),
+                        color = AeopinMidnight.copy(alpha = opacity)
+                    ) {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            WindowDraggableArea {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(44.dp)
+                                        .padding(horizontal = 16.dp),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(12.dp)
+                                                .background(AeopinTurquoise, CircleShape)
+                                                .shadow(6.dp, CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            "DROP",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = Color.White.copy(alpha = 0.5f)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp)
+                                    .padding(bottom = 16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                StorageAppliance(storageState)
+                                
+                                Spacer(modifier = Modifier.height(28.dp))
+                                
+                                SearchScreen(
+                                    modifier = Modifier.weight(1f),
+                                    searchQuery = searchQuery,
+                                    onSearchQueryChange = { searchQuery = it },
+                                    window = window
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+    } catch (e: Throwable) {
+        e.printStackTrace()
+        // Force exit with non-zero code
+        java.lang.System.exit(1)
     }
 }
 
@@ -395,7 +401,9 @@ val appModule = module {
                 if (rs.next()) rs.getLong(1) else 0L
             }
             
-            if (version < 3L) {
+            val hasItemsTable = metadata.getTables(null, null, "AeopinItems", null).use { it.next() }
+            
+            if (version < 3L && hasItemsTable) {
                 conn.createStatement().use { it.execute("PRAGMA user_version = 3;") }
             }
         }
