@@ -52,176 +52,178 @@ sealed class UiStorageState {
     data class Error(val message: String) : UiStorageState()
 }
 
-fun main() = application {
+fun main() {
     try {
-        // SINGLE INSTANCE LOCK
-        val lockSocket = try {
-            java.net.ServerSocket(49152)
-        } catch (e: Exception) {
-            return@application
-        }
-
-        val koinApp = remember {
-            startKoin {
-                modules(appModule)
+        application {
+            // SINGLE INSTANCE LOCK
+            val lockSocket = try {
+                java.net.ServerSocket(49152)
+            } catch (e: Exception) {
+                return@application
             }
-        }
-        
-        val vaultService = koinApp.koin.get<VaultService>()
-        val settingsManager = koinApp.koin.get<SettingsManager>()
 
-        var isVisible by remember { mutableStateOf(true) }
-        var windowActive by remember { mutableStateOf(true) }
-        var storageState by remember { mutableStateOf<UiStorageState>(UiStorageState.Idle) }
-        var searchQuery by remember { mutableStateOf("") }
-        val scope = rememberCoroutineScope()
-
-        val hotkeyManager = remember { GlobalHotkeyManager { isVisible = !isVisible } }
-
-        LaunchedEffect(Unit) {
-            vaultService.startScavenger()
-            hotkeyManager.init()
-        }
-
-        // THE "WINK" ANIMATION (Vertical Shrink)
-        val winkProgress = remember { Animatable(0f) }
-        LaunchedEffect(isVisible) {
-            if (isVisible) {
-                windowActive = true
-                winkProgress.animateTo(1f, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow))
-            } else {
-                winkProgress.animateTo(0f, tween(250, easing = FastOutSlowInEasing))
-                windowActive = false
-            }
-        }
-
-        Tray(
-            icon = painterResource("icon.ico"),
-            tooltip = "DROP",
-            onAction = { isVisible = true },
-            menu = {
-                Item("Show", onClick = { isVisible = true })
-                Item("Exit", onClick = { exitApplication() })
-            }
-        )
-
-        if (windowActive) {
-            Dialog(
-                onCloseRequest = { isVisible = false },
-                state = rememberDialogState(
-                    width = 340.dp,
-                    height = 520.dp,
-                    position = WindowPosition(Alignment.Center)
-                ),
-                title = "DROP",
-                undecorated = true,
-                transparent = true,
-                resizable = false
-            ) {
-                // Dialogs are hidden from taskbar by default on Windows
-                LaunchedEffect(window) {
-                    window.isAlwaysOnTop = true
+            val koinApp = remember {
+                startKoin {
+                    modules(appModule)
                 }
+            }
+            
+            val vaultService = koinApp.koin.get<VaultService>()
+            val settingsManager = koinApp.koin.get<SettingsManager>()
 
-                val windowInfo = LocalWindowInfo.current
-                val isFocused = windowInfo.isWindowFocused
-                val isDraggingOver = storageState is UiStorageState.Dragging
-                
-                val opacity by animateFloatAsState(
-                    targetValue = if (isFocused || isDraggingOver) 1.0f else 0.95f,
-                    animationSpec = tween(200)
-                )
+            var isVisible by remember { mutableStateOf(true) }
+            var windowActive by remember { mutableStateOf(true) }
+            var storageState by remember { mutableStateOf<UiStorageState>(UiStorageState.Idle) }
+            var searchQuery by remember { mutableStateOf("") }
+            val scope = rememberCoroutineScope()
 
-                LaunchedEffect(window) {
-                    DropTarget(window, DesktopDropAdapter(
-                        vaultService = vaultService,
-                        scope = scope,
-                        onDragStateChange = { if (it) storageState = UiStorageState.Dragging else if (storageState == UiStorageState.Dragging) storageState = UiStorageState.Idle },
-                        onStorageStarted = { },
-                        onStorageSuccess = { label ->
-                            scope.launch {
-                                storageState = UiStorageState.Success(label)
-                                delay(2000)
-                                storageState = UiStorageState.Idle
-                            }
-                        },
-                        onStorageError = { msg ->
-                            scope.launch {
-                                storageState = UiStorageState.Error(msg)
-                                delay(3000)
-                                storageState = UiStorageState.Idle
-                            }
-                        }
-                    ))
+            val hotkeyManager = remember { GlobalHotkeyManager { isVisible = !isVisible } }
+
+            LaunchedEffect(Unit) {
+                vaultService.startScavenger()
+                hotkeyManager.init()
+            }
+
+            // THE "WINK" ANIMATION (Vertical Shrink)
+            val winkProgress = remember { Animatable(0f) }
+            LaunchedEffect(isVisible) {
+                if (isVisible) {
+                    windowActive = true
+                    winkProgress.animateTo(1f, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow))
+                } else {
+                    winkProgress.animateTo(0f, tween(250, easing = FastOutSlowInEasing))
+                    windowActive = false
                 }
+            }
 
-                AeopinTheme {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer {
-                                // VERTICAL WINK EFFECT
-                                scaleY = winkProgress.value
-                                alpha = winkProgress.value
-                                scaleX = 0.95f + (0.05f * winkProgress.value)
-                                transformOrigin = androidx.compose.ui.graphics.TransformOrigin.Center
-                            }
-                            .border(
-                                width = 1.dp,
-                                brush = Brush.verticalGradient(
-                                    listOf(
-                                        if (isFocused) AeopinTurquoise.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.12f),
-                                        Color.Transparent
-                                    )
-                                ),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .clip(RoundedCornerShape(12.dp)),
-                        color = AeopinMidnight.copy(alpha = opacity)
-                    ) {
-                        Column(modifier = Modifier.fillMaxSize()) {
-                            WindowDraggableArea {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(44.dp)
-                                        .padding(horizontal = 16.dp),
-                                    contentAlignment = Alignment.CenterStart
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(12.dp)
-                                                .background(AeopinTurquoise, CircleShape)
-                                                .shadow(6.dp, CircleShape)
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(
-                                            "DROP",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = Color.White.copy(alpha = 0.5f)
-                                        )
-                                    }
+            Tray(
+                icon = painterResource("icon.ico"),
+                tooltip = "DROP",
+                onAction = { isVisible = true },
+                menu = {
+                    Item("Show", onClick = { isVisible = true })
+                    Item("Exit", onClick = { exitApplication() })
+                }
+            )
+
+            if (windowActive) {
+                Dialog(
+                    onCloseRequest = { isVisible = false },
+                    state = rememberDialogState(
+                        width = 340.dp,
+                        height = 520.dp,
+                        position = WindowPosition(Alignment.Center)
+                    ),
+                    title = "DROP",
+                    undecorated = true,
+                    transparent = true,
+                    resizable = false
+                ) {
+                    // Dialogs are hidden from taskbar by default on Windows
+                    LaunchedEffect(window) {
+                        window.isAlwaysOnTop = true
+                    }
+
+                    val windowInfo = LocalWindowInfo.current
+                    val isFocused = windowInfo.isWindowFocused
+                    val isDraggingOver = storageState is UiStorageState.Dragging
+                    
+                    val opacity by animateFloatAsState(
+                        targetValue = if (isFocused || isDraggingOver) 1.0f else 0.95f,
+                        animationSpec = tween(200)
+                    )
+
+                    LaunchedEffect(window) {
+                        DropTarget(window, DesktopDropAdapter(
+                            vaultService = vaultService,
+                            scope = scope,
+                            onDragStateChange = { if (it) storageState = UiStorageState.Dragging else if (storageState == UiStorageState.Dragging) storageState = UiStorageState.Idle },
+                            onStorageStarted = { },
+                            onStorageSuccess = { label ->
+                                scope.launch {
+                                    storageState = UiStorageState.Success(label)
+                                    delay(2000)
+                                    storageState = UiStorageState.Idle
+                                }
+                            },
+                            onStorageError = { msg ->
+                                scope.launch {
+                                    storageState = UiStorageState.Error(msg)
+                                    delay(3000)
+                                    storageState = UiStorageState.Idle
                                 }
                             }
+                        ))
+                    }
 
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 16.dp)
-                                    .padding(bottom = 16.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                StorageAppliance(storageState)
-                                
-                                Spacer(modifier = Modifier.height(28.dp))
-                                
-                                SearchScreen(
-                                    modifier = Modifier.weight(1f),
-                                    searchQuery = searchQuery,
-                                    onSearchQueryChange = { searchQuery = it },
-                                    window = window
+                    AeopinTheme {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    // VERTICAL WINK EFFECT
+                                    scaleY = winkProgress.value
+                                    alpha = winkProgress.value
+                                    scaleX = 0.95f + (0.05f * winkProgress.value)
+                                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin.Center
+                                }
+                                .border(
+                                    width = 1.dp,
+                                    brush = Brush.verticalGradient(
+                                        listOf(
+                                            if (isFocused) AeopinTurquoise.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.12f),
+                                            Color.Transparent
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
                                 )
+                                .clip(RoundedCornerShape(12.dp)),
+                            color = AeopinMidnight.copy(alpha = opacity)
+                        ) {
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                WindowDraggableArea {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(44.dp)
+                                            .padding(horizontal = 16.dp),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(12.dp)
+                                                    .background(AeopinTurquoise, CircleShape)
+                                                    .shadow(6.dp, CircleShape)
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text(
+                                                "DROP",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = Color.White.copy(alpha = 0.5f)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 16.dp)
+                                        .padding(bottom = 16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    StorageAppliance(storageState)
+                                    
+                                    Spacer(modifier = Modifier.height(28.dp))
+                                    
+                                    SearchScreen(
+                                        modifier = Modifier.weight(1f),
+                                        searchQuery = searchQuery,
+                                        onSearchQueryChange = { searchQuery = it },
+                                        window = window
+                                    )
+                                }
                             }
                         }
                     }
@@ -230,106 +232,7 @@ fun main() = application {
         }
     } catch (e: Throwable) {
         e.printStackTrace()
-        // Force exit with non-zero code
         java.lang.System.exit(1)
-    }
-}
-
-@Composable
-fun StorageAppliance(state: UiStorageState) {
-    val isDragging = state is UiStorageState.Dragging
-    val isSuccess = state is UiStorageState.Success
-    val isError = state is UiStorageState.Error
-    
-    val lift by animateDpAsState(if (isDragging) 12.dp else 0.dp, tween(200))
-    val scale by animateFloatAsState(if (isDragging) 1.05f else 1.0f, tween(250, easing = FastOutSlowInEasing))
-    val glowAlpha by animateFloatAsState(if (isDragging) 0.6f else 0f, tween(300))
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(130.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                translationY = -lift.toPx() / 2
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .blur(24.dp)
-                .alpha(glowAlpha)
-                .background(AeopinTurquoise.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
-        )
-
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            shape = RoundedCornerShape(16.dp),
-            color = AeopinDeepSlate,
-            border = androidx.compose.foundation.BorderStroke(
-                width = 1.dp,
-                brush = Brush.verticalGradient(
-                    listOf(Color.White.copy(alpha = 0.15f), Color.Transparent)
-                )
-            ),
-            shadowElevation = lift
-        ) {
-            AnimatedContent(
-                targetState = state,
-                transitionSpec = {
-                    (fadeIn(tween(150)) + scaleIn(initialScale = 0.96f)) togetherWith fadeOut(tween(150))
-                }
-            ) { targetState ->
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    when (targetState) {
-                        is UiStorageState.Idle -> {
-                            Text(
-                                "DRAG AND DROP",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = Color.White.copy(alpha = 0.35f)
-                            )
-                        }
-                        is UiStorageState.Dragging -> {
-                            Text(
-                                "RELEASE",
-                                style = MaterialTheme.typography.headlineLarge,
-                                color = AeopinTurquoise
-                            )
-                            Text(
-                                "TO DROP",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = AeopinTurquoise.copy(alpha = 0.6f)
-                            )
-                        }
-                        is UiStorageState.Success -> {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = null,
-                                tint = AeopinTurquoise,
-                                modifier = Modifier.size(36.dp)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                targetState.name,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.9f),
-                                maxLines = 1
-                            )
-                        }
-                        is UiStorageState.Error -> {
-                            Text("FAIL", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.error)
-                            Text(targetState.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -426,4 +329,64 @@ val appModule = module {
     single { VaultManager(vaultPath) }
     single { SettingsManager(vaultPath) }
     single { VaultService(get(), get(), CoroutineScope(Dispatchers.IO + SupervisorJob())) }
+}
+
+@Composable
+fun StorageAppliance(state: UiStorageState) {
+    val isDragging = state is UiStorageState.Dragging
+    val isSuccess = state is UiStorageState.Success
+    val isError = state is UiStorageState.Error
+    
+    val lift by animateDpAsState(if (isDragging) 12.dp else 0.dp, tween(200))
+    val scale by animateFloatAsState(if (isDragging) 1.05f else 1.0f, tween(250, easing = FastOutSlowInEasing))
+    val ambientGlow by animateColorAsState(
+        targetValue = when {
+            isDragging -> AeopinTurquoise.copy(alpha = 0.15f)
+            isSuccess -> Color.Green.copy(alpha = 0.1f)
+            isError -> Color.Red.copy(alpha = 0.1f)
+            else -> Color.Transparent
+        }
+    )
+
+    Box(
+        modifier = Modifier
+            .size(140.dp)
+            .graphicsLayer {
+                translationY = -lift.toPx()
+                scaleX = scale
+                scaleY = scale
+            }
+            .background(ambientGlow, CircleShape)
+            .border(1.dp, Color.White.copy(alpha = 0.08f), CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        // Visual indicator of state
+        when (state) {
+            is UiStorageState.Dragging -> {
+                Icon(Icons.Default.Check, null, modifier = Modifier.size(48.dp), tint = AeopinTurquoise.copy(alpha = 0.4f))
+            }
+            is UiStorageState.Success -> {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Check, null, modifier = Modifier.size(40.dp), tint = Color.Green)
+                    Text("SAVED", style = MaterialTheme.typography.labelSmall, color = Color.Green)
+                }
+            }
+            is UiStorageState.Error -> {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("FAIL", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.error)
+                    Text(state.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+            else -> {
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .background(
+                            Brush.radialGradient(listOf(AeopinTurquoise.copy(alpha = 0.12f), Color.Transparent)),
+                            CircleShape
+                        )
+                )
+            }
+        }
+    }
 }
