@@ -21,7 +21,7 @@ AEOPIN/
 └── aeopin-authority.exe # Lifecycle manager and primary entry point
 ```
 
-## 🛠️ Testing & Installation
+## Testing & Installation
 
 ### Option 1: Standard (Internet Required)
 - Download **`aeopin-authority.exe`**.
@@ -44,16 +44,6 @@ AEOPIN/
 ---
 
 ## For Developers
-
-"A mechanic gets pissed at a machine and can at least physically attack the problem:
-
-'WHY THE FUCK ARE YOU DOING THAT?' [wrench]
-
-Software gives you:
-
-NullPointerException
-
-and your only available wrench is a $150 keyboard."
 
 ### Prerequisites
 *   JDK 17+
