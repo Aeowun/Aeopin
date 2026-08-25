@@ -21,13 +21,19 @@ AEOPIN/
 └── aeopin-authority.exe # Lifecycle manager and primary entry point
 ```
 
-## How to use
-1.  **Launch**: Run `aeopin-authority.exe`.
-2.  **Summon**: Press **Alt + Shift + V** to bring it up.
-3.  **Drop**: Drag anything onto the top zone. AEOPIN moves the physical file to the vault.
-4.  **Confirm**: You'll see a checkmark once it's safe.
-5.  **Find**: Search bar filters results as you type.
-6.  **Get it back**: Right-click to **Restore** or just **Drag out** to move it back to your Desktop.
+## 🛠️ Testing & Installation
+
+### Option 1: Standard (Internet Required)
+- Download **`aeopin-authority.exe`**.
+- Run it. The Authority will automatically fetch the core app and install it.
+
+### Option 2: Offline (Air-gapped)
+- Download **`aeopin-authority.exe`** AND **`aeopin-portable.zip`**.
+- Place them in the same folder.
+- Run the `.exe`. It will detect the local zip and install without a network.
+
+> [!NOTE]
+> **Development Bug Testing**: This is an internal beta. Please use the "Copy Error Report" button in the Authority if you encounter a crash and visit our [Support Page](https://aeowun.com/support/).
 
 ## Data & Privacy
 
