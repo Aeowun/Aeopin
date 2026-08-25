@@ -12,6 +12,8 @@ out/
 
 # Planning & Local Data
 .artifacts/
+PROJECT.md
+CHANGELOG.md
 
 # Log files
 *.log
@@ -20,3 +22,9 @@ output.txt
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Rust
+authority/target/
+
+# Local configuration
+local.properties

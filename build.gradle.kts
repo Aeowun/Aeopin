@@ -81,8 +81,19 @@ compose.desktop {
             packageName = "AEOPIN"
             packageVersion = "1.6.0"
             includeAllModules = true
-            // Explicitly including modules that Skia and SQLite depend on to prevent launch crashes
-            modules("java.instrument", "java.sql", "jdk.unsupported") 
+            // Explicitly including modules that Skia, SQLite, and JNativeHook depend on
+            modules(
+                "java.instrument", 
+                "java.sql", 
+                "jdk.unsupported", 
+                "java.desktop", 
+                "java.management", 
+                "java.naming", 
+                "java.xml",
+                "jdk.charsets",
+                "java.logging",
+                "java.prefs"
+            ) 
             vendor = "Aeowun"
             description = "Drop first, organize later. A Windows utility for immediate information capture."
             copyright = "© 2026 Aeowun"
@@ -96,6 +107,14 @@ compose.desktop {
             }
         }
     }
+}
+
+tasks.register<Zip>("zipDistributable") {
+    group = "package"
+    from("build/compose/binaries/main/app/AEOPIN")
+    archiveFileName.set("aeopin-portable.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("distributions"))
+    dependsOn("createDistributable")
 }
 
 sqldelight {

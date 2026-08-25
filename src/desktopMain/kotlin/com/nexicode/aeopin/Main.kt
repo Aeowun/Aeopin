@@ -14,7 +14,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.awt.ComposeWindow
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
@@ -329,7 +328,10 @@ fun StorageAppliance(state: UiStorageState) {
 }
 
 val appModule = module {
-    val vaultPath = System.getProperty("user.home") + "/Documents/AEOPIN"
+    val vaultPath = System.getProperty("aeopin.data.dir") 
+        ?: System.getenv("AEOPIN_DATA_DIR")
+        ?: (System.getProperty("user.home") + "/Documents/AEOPIN")
+        
     single<Database> {
         val dbFile = File(vaultPath, "aeopin.db")
         if (!dbFile.parentFile.exists()) dbFile.parentFile.mkdirs()

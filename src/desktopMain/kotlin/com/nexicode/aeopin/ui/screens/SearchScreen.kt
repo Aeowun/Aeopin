@@ -55,7 +55,6 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.text.SimpleDateFormat
 import java.util.*
-import androidx.compose.ui.awt.ComposeWindow
 import javax.swing.JPanel
 import com.nexicode.aeopin.ui.InternalDragTracker
 import kotlin.io.path.deleteRecursively
@@ -68,7 +67,7 @@ fun SearchScreen(
     modifier: Modifier = Modifier,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
-    window: ComposeWindow
+    window: java.awt.Component
 ) {
     val database = koinInject<Database>()
     val vaultManager = koinInject<VaultManager>()
@@ -326,7 +325,7 @@ fun AeopinItemRow(
     onOpen: () -> Unit,
     vaultManager: VaultManager,
     onDeletePermanently: () -> Unit,
-    window: ComposeWindow,
+    window: java.awt.Component,
     onDragStarted: (AeopinItems) -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }

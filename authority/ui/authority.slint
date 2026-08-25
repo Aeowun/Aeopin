@@ -1,0 +1,142 @@
+import { Button, VerticalBox, HorizontalBox, TextEdit, ProgressIndicator, LineEdit } from "std-widgets.slint";
+
+export component AuthorityWindow inherits Window {
+    title: "AEOPIN Authority";
+    width: 400px;
+    height: 400px;
+    background: #1e1e1e;
+
+    in-out property <string> status_text: "AEOPIN is ready to install.";
+    in-out property <string> app_version: "1.6.0";
+    in-out property <float> progress: 0.0;
+    in-out property <bool> is_working: false;
+    in-out property <string> state: "not_installed"; // not_installed, installed, running, error, settings
+    in-out property <string> hotkey: "Alt+Shift+V";
+
+    callback install_clicked();
+    callback launch_clicked();
+    callback repair_clicked();
+    callback update_clicked();
+    callback settings_clicked();
+    callback back_clicked();
+    callback save_settings_clicked(string);
+    callback copy_error_report_clicked();
+
+    VerticalBox {
+        padding: 20px;
+        spacing: 10px;
+
+        if state != "settings" : VerticalBox {
+            padding: 0;
+            HorizontalBox {
+                padding: 0;
+                Text {
+                    text: "AEOPIN";
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: white;
+                    horizontal-alignment: left;
+                }
+                Rectangle { horizontal-stretch: 1.0; }
+                Button {
+                    text: "Settings";
+                    enabled: !is_working;
+                    clicked => { root.settings_clicked(); }
+                }
+            }
+
+            Text {
+                text: "v" + app_version;
+                font-size: 14px;
+                color: #888;
+                horizontal-alignment: center;
+            }
+
+            Rectangle { vertical-stretch: 1.0; }
+
+            Text {
+                text: status_text;
+                color: white;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+
+            if is_working : ProgressIndicator {
+                progress: progress;
+            }
+
+            Rectangle { height: 10px; }
+
+            if state == "not_installed" : Button {
+                text: "Install AEOPIN";
+                enabled: !is_working;
+                clicked => { root.install_clicked(); }
+            }
+
+            if state == "installed" : VerticalBox {
+                padding: 0;
+                spacing: 10px;
+                Button {
+                    text: "Launch AEOPIN";
+                    enabled: !is_working;
+                    clicked => { root.launch_clicked(); }
+                }
+                Button {
+                    text: "Check for Updates";
+                    enabled: !is_working;
+                    clicked => { root.update_clicked(); }
+                }
+            }
+
+            if state == "running" : Button {
+                text: "AEOPIN is running";
+                enabled: false;
+            }
+
+            if state == "error" : VerticalBox {
+                padding: 0;
+                spacing: 10px;
+                Button {
+                    text: "Repair AEOPIN";
+                    enabled: !is_working;
+                    clicked => { root.repair_clicked(); }
+                }
+                Button {
+                    text: "Copy Error Report";
+                    clicked => { root.copy_error_report_clicked(); }
+                }
+            }
+        }
+
+        if state == "settings" : VerticalBox {
+            padding: 0;
+            spacing: 15px;
+            Text {
+                text: "Settings";
+                font-size: 20px;
+                color: white;
+            }
+
+            Text { text: "Global Hotkey:"; color: #aaa; }
+            hotkey_input := LineEdit {
+                text: hotkey;
+            }
+
+            Rectangle { vertical-stretch: 1.0; }
+
+            HorizontalBox {
+                padding: 0;
+                Button {
+                    text: "Back";
+                    clicked => { root.back_clicked(); }
+                }
+                Rectangle { horizontal-stretch: 1.0; }
+                Button {
+                    text: "Save";
+                    primary: true;
+                    clicked => { root.save_settings_clicked(hotkey_input.text); }
+                }
+            }
+        }
+    }
+}
