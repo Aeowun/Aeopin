@@ -23,17 +23,12 @@ AEOPIN/
 
 ## Testing & Installation
 
-### Option 1: Standard (Internet Required)
-- Download **`aeopin-authority.exe`**.
-- Run it. The Authority will automatically fetch the core app and install it.
-
-### Option 2: Offline (Air-gapped)
+### (Air-gapped)
 - Download **`aeopin-authority.exe`** AND **`aeopin-portable.zip`**.
 - Place them in the same folder.
-- Run the `.exe`. It will detect the local zip and install without a network.
+- UNZIP and OPEN **`aeopin-portable.zip`**
+- Run the `AEOPIN.exe` . It will detect the local files and install without a network.
 
-> [!NOTE]
-> **Development Bug Testing**: This is an internal beta. Please use the "Copy Error Report" button in the Authority if you encounter a crash and visit our [Support Page](https://aeowun.com/support/).
 
 ## Data & Privacy
 
