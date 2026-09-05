@@ -7,6 +7,7 @@ import kotlinx.coroutines.launch
 import java.awt.datatransfer.DataFlavor
 import java.awt.dnd.*
 import java.io.File
+import java.net.URI
 
 /**
  * A native AWT DropTarget adapter for Windows/Desktop ingestion.
@@ -68,12 +69,33 @@ class DesktopDropAdapter(
                     onStorageSuccess(label)
                 }
                 dtde.dropComplete(true)
+            } else if (transferable.isDataFlavorSupported(DataFlavor.selectionHtmlFlavor)) {
+                val html = transferable.getTransferData(DataFlavor.selectionHtmlFlavor) as String
+                val link = extractLinkFromHtml(html)
+                if (link != null) {
+                    scope.launch {
+                        vaultService.store(
+                            AeopinInput.UrlInput(
+                                url = link.first,
+                                title = link.second
+                            )
+                        )
+                        onStorageSuccess("Link")
+                    }
+                    dtde.dropComplete(true)
+                } else {
+                    onStorageError("Dropped HTML did not contain a link")
+                    dtde.dropComplete(false)
+                }
             } else if (transferable.isDataFlavorSupported(DataFlavor.stringFlavor)) {
-                val text = transferable.getTransferData(DataFlavor.stringFlavor) as String
+                val text = (transferable.getTransferData(DataFlavor.stringFlavor) as String).trim()
+                val uri = runCatching { URI(text) }.getOrNull()
                 scope.launch {
-                    if (text.startsWith("http")) {
+                    if (uri?.scheme.equals("http", ignoreCase = true) ||
+                        uri?.scheme.equals("https", ignoreCase = true)
+                    ) {
                         vaultService.store(AeopinInput.UrlInput(text))
-                        onStorageSuccess("URL")
+                        onStorageSuccess("Link")
                     } else {
                         vaultService.store(AeopinInput.TextInput(text))
                         onStorageSuccess("Text")
@@ -94,6 +116,20 @@ class DesktopDropAdapter(
     private fun onMessage(msg: String) {
         // Simple fallback
         println(msg)
+    }
+
+    private fun extractLinkFromHtml(html: String): Pair<String, String?>? {
+        val match = Regex(
+            """<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a>""",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+        ).find(html) ?: return null
+        val url = match.groupValues[1].trim()
+        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        if (uri.scheme?.equals("http", ignoreCase = true) != true &&
+            uri.scheme?.equals("https", ignoreCase = true) != true
+        ) return null
+        val title = match.groupValues[2].replace(Regex("<[^>]+>"), "").trim().ifBlank { null }
+        return url to title
     }
 
     private fun isFolderTooLarge(folder: File): Boolean {

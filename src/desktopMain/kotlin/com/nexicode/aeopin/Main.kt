@@ -84,6 +84,10 @@ fun main() {
                 hotkeyManager.init()
             }
 
+            DisposableEffect(hotkeyManager) {
+                onDispose { hotkeyManager.stop() }
+            }
+
             // THE "WINK" ANIMATION (Vertical Shrink)
             val winkProgress = remember { Animatable(0f) }
             LaunchedEffect(isVisible) {

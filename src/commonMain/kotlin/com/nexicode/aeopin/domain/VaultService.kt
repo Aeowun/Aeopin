@@ -11,13 +11,38 @@ import java.nio.file.Path
 import java.util.UUID
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.name
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 sealed class AeopinInput {
     data class FileInput(val file: File) : AeopinInput()
     data class FolderInput(val folder: File) : AeopinInput()
     data class TextInput(val text: String) : AeopinInput()
-    data class UrlInput(val url: String) : AeopinInput()
+    data class UrlInput(
+        val url: String,
+        val title: String? = null,
+        val sourceContext: String? = null,
+        val previewText: String? = null
+    ) : AeopinInput()
 }
+
+@Serializable
+private data class LinkMetadata(
+    val url: String,
+    val title: String? = null,
+    val domain: String? = null,
+    val sourceContext: String? = null,
+    val previewText: String? = null
+)
+
+@Serializable
+private data class FileMetadata(
+    val name: String,
+    val path: String,
+    val extension: String? = null,
+    val size: Long
+)
 
 class VaultService(
     private val database: Database,
@@ -26,6 +51,7 @@ class VaultService(
 ) {
     private val queries = database.databaseQueries
     private val processingMutex = Mutex()
+    private val json = Json { encodeDefaults = false; explicitNulls = false }
 
     suspend fun store(input: AeopinInput): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -61,11 +87,18 @@ class VaultService(
                     )
                 }
                 is AeopinInput.UrlInput -> {
+                    val metadata = LinkMetadata(
+                        url = input.url.trim(),
+                        title = input.title?.trim()?.ifBlank { null },
+                        domain = runCatching { java.net.URI(input.url.trim()).host }.getOrNull(),
+                        sourceContext = input.sourceContext?.trim()?.ifBlank { null },
+                        previewText = input.previewText?.trim()?.ifBlank { null }
+                    )
                     queries.insertJournal(
                         type = "URL",
-                        stagedPath = input.url,
+                        stagedPath = json.encodeToString(metadata),
                         sourcePath = null,
-                        expectedSize = input.url.length.toLong(),
+                        expectedSize = metadata.url.length.toLong(),
                         state = "COMPLETE",
                         timestamp = System.currentTimeMillis()
                     )
@@ -147,7 +180,14 @@ class VaultService(
                         originalName = File(journal.sourcePath!!).name,
                         originalPath = journal.sourcePath,
                         contentHash = journal.expectedHash,
-                        metadataJson = "{}",
+                        metadataJson = json.encodeToString(
+                            FileMetadata(
+                                name = File(journal.sourcePath).name,
+                                path = journal.sourcePath,
+                                extension = File(journal.sourcePath).extension.takeIf { it.isNotBlank() },
+                                size = journal.expectedSize ?: 0L
+                            )
+                        ),
                         timestamp = journal.timestamp,
                         isPinned = false
                     )
@@ -213,7 +253,22 @@ class VaultService(
 
     private fun processUrlJournal(journal: com.nexicode.aeopin.data.PendingIngestion) {
         if (journal.state == "COMPLETE") {
-            queries.insertItem("URL", journal.stagedPath ?: "URL", null, null, "{\"url\": \"${journal.stagedPath}\"}", journal.timestamp, false)
+            val stored = journal.stagedPath?.trim().orEmpty()
+            val metadata = runCatching {
+                json.decodeFromString<LinkMetadata>(stored)
+            }.getOrElse {
+                val uri = java.net.URI(stored)
+                LinkMetadata(url = stored, domain = uri.host)
+            }
+            queries.insertItem(
+                "URL",
+                metadata.title ?: metadata.domain ?: metadata.url,
+                null,
+                null,
+                json.encodeToString(metadata),
+                journal.timestamp,
+                false
+            )
             queries.deleteJournal(journal.id)
         }
     }

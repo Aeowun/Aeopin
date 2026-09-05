@@ -60,6 +60,9 @@ import com.nexicode.aeopin.ui.InternalDragTracker
 import kotlin.io.path.deleteRecursively
 import java.awt.event.InputEvent
 import java.awt.event.MouseEvent
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -266,7 +269,7 @@ private fun openItem(item: AeopinItems, vaultManager: VaultManager) {
                 }
             }
             "URL" -> {
-                val url = item.metadataJson?.substringAfter("\"url\": \"")?.substringBefore("\"") ?: ""
+                val url = extractUrl(item.metadataJson)
                 if (url.startsWith("http")) Desktop.getDesktop().browse(URI(url))
             }
             "TEXT" -> {}
@@ -283,6 +286,13 @@ private fun deleteItemPermanently(item: AeopinItems, queries: com.nexicode.aeopi
             Files.deleteIfExists(path)
         }
     }
+}
+
+private fun extractUrl(metadataJson: String?): String {
+    if (metadataJson.isNullOrBlank()) return ""
+    return runCatching {
+        Json.parseToJsonElement(metadataJson).jsonObject["url"]?.jsonPrimitive?.content.orEmpty()
+    }.getOrDefault("")
 }
 
 @Composable
@@ -396,7 +406,7 @@ fun AeopinItemRow(
                                 Toolkit.getDefaultToolkit().systemClipboard.setContents(transferable, null)
                             } else {
                                 val text = when(item.type) {
-                                    "URL" -> item.metadataJson?.substringAfter("\"url\": \"")?.substringBefore("\"") ?: ""
+                                    "URL" -> extractUrl(item.metadataJson)
                                     else -> item.metadataJson ?: ""
                                 }
                                 clipboardManager.setText(AnnotatedString(text))

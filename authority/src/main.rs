@@ -16,7 +16,7 @@ use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS};
 use windows::core::PCWSTR;
 
-const METADATA_URL: &str = "https://raw.githubusercontent.com/Aeowun/Aeopin_v0.1.5/main/versions.json";
+const METADATA_URL: &str = "https://raw.githubusercontent.com/Aeowun/Aeopin/main/versions.json";
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 struct VersionMetadata {
@@ -65,7 +65,7 @@ impl AuthorityState {
             staging_dir: app_dir.join("staging"),
             settings_file,
             child_process: None,
-            current_version: "1.6.0".to_string(),
+            current_version: "1.1.0".to_string(),
             settings,
             last_error: None,
         }
