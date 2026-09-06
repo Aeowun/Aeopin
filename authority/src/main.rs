@@ -260,6 +260,7 @@ impl AuthorityState {
         if let Some(child_arc) = self.child_process.take() {
             let mut child = child_arc.lock().unwrap();
             let _ = child.kill();
+            let _ = child.wait();
         }
     }
 
