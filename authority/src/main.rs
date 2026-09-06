@@ -19,6 +19,8 @@ use windows::core::PCWSTR;
 const METADATA_URL: &str = "https://raw.githubusercontent.com/Aeowun/Aeopin/main/versions.json";
 const APP_NAME: &str = "AEOPIN";
 const AUTHORITY_EXE: &str = "aeopin-authority.exe";
+const PACKAGE_FILE: &str = "aeopin-portable.zip";
+const LEGACY_PACKAGE_FILE: &str = "Aeopin-win-Portable.zip";
 const CURRENT_VERSION: &str = "1.2.2";
 const SUPPORT_URL: &str = "https://Aeowun.com";
 const INSTALL_URL: &str = "https://github.com/Aeowun/Aeopin/releases/latest";
@@ -276,16 +278,17 @@ impl AuthorityState {
                         fs::create_dir_all(p)?;
                     }
 
-                    if !self.staging_dir.join("AEOPIN.exe").is_file() {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "Package does not contain the required AEOPIN.exe",
-                        ));
-                    }
                 }
                 let mut outfile = fs::File::create(&outpath)?;
                 io::copy(&mut file, &mut outfile)?;
             }
+        }
+
+        if !self.staging_dir.join("AEOPIN.exe").is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Package does not contain the required AEOPIN.exe",
+            ));
         }
 
         let bin_old = self.bin_dir.with_extension("old");
@@ -448,23 +451,29 @@ fn load_verified_package(
     metadata: &VersionMetadata,
     ui_handle: slint::Weak<AuthorityWindow>,
 ) -> io::Result<Vec<u8>> {
-    let local_package = Path::new("aeopin-portable.zip");
-    if local_package.exists() {
-        let local_bytes = fs::read(local_package)?;
-        if AuthorityState::verify_sha256(&local_bytes, &metadata.sha256) {
-            let version = metadata.version.clone();
-            slint::invoke_from_event_loop({
-                let ui_handle = ui_handle.clone();
-                move || {
-                    if let Some(ui) = ui_handle.upgrade() {
-                        ui.set_status_text(slint::format!(
-                            "Using verified AEOPIN v{} package...",
-                            version
-                        ));
+    let release_dir = env::current_exe()?
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Authority has no parent directory"))?
+        .to_path_buf();
+    for name in [PACKAGE_FILE, LEGACY_PACKAGE_FILE] {
+        let local_package = release_dir.join(name);
+        if local_package.is_file() {
+            let local_bytes = fs::read(&local_package)?;
+            if AuthorityState::verify_sha256(&local_bytes, &metadata.sha256) {
+                let version = metadata.version.clone();
+                slint::invoke_from_event_loop({
+                    let ui_handle = ui_handle.clone();
+                    move || {
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_status_text(slint::format!(
+                                "Using verified AEOPIN v{} package...",
+                                version
+                            ));
+                        }
                     }
-                }
-            }).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-            return Ok(local_bytes);
+                }).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                return Ok(local_bytes);
+            }
         }
     }
 
