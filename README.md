@@ -1,4 +1,4 @@
-# AEOPIN v1.1.0
+# AEOPIN v1.2.0
 
 AEOPIN is a Windows capture tool.
 
@@ -11,7 +11,7 @@ The core workflow is **one-key capture from anywhere plus instant searchable rec
 - Search saved items by filename, path, extension, URL, domain, title, or text.
 - Drag saved files and folders back out when you need them.
 
-Version 1.1.0 improves global hotkey reliability, structured link metadata, HTML link drops, and searchable file metadata.
+Version 1.2.0 improves installation, entry-point, update, and desktop shortcut behavior on Windows. Version 1.1.0 introduced global hotkey reliability, structured link metadata, HTML link drops, and searchable file metadata.
 
 ## Architecture
 
@@ -32,11 +32,19 @@ AEOPIN/
 
 ## Testing & Installation
 
-### (Air-gapped)
-- Download **`aeopin-authority.exe`** AND **`aeopin-portable.zip`**.
-- Place them in the same folder.
-- UNZIP and OPEN **`aeopin-portable.zip`**
-- Run the `AEOPIN.exe` . It will detect the local files and install without a network.
+### Windows installation
+
+Download `aeopin-authority.exe` and `aeopin-portable.zip` from the same release and run the Authority executable. It installs the application under `%LOCALAPPDATA%\AEOPIN`, creates `AEOPIN.lnk` on the current user's desktop, and launches the managed application from that installation.
+
+The Authority can be run again safely:
+
+- A first install creates the managed `bin`, `data`, and `logs` directories.
+- Existing v1.1 or older portable folders are migrated into `%LOCALAPPDATA%\AEOPIN` when possible.
+- Existing `data` is preserved during install, repair, and update.
+- Updates stop the managed app, replace only the application payload, recreate the shortcut, and leave user data in place.
+- Running an older Authority against a newer installed payload does not downgrade it; updates are applied only when the remote semantic version is newer.
+
+For offline installation, keep both files together. The Authority uses the local portable archive when present and otherwise downloads and verifies the archive using the SHA-256 value in `versions.json`.
 
 
 ## Data & Privacy
@@ -68,6 +76,15 @@ AEOPIN does not fetch web pages during capture. Link titles are taken from avail
 
 The portable archive is written to `build/distributions/aeopin-portable.zip`.
 
+### Build Authority installer entry point
+
+```powershell
+cd authority
+cargo build --release
+```
+
+Place `authority\target\release\aeopin-authority.exe` beside `aeopin-portable.zip` for a release package. The Authority is the installer, updater, repair tool, and stable desktop entry point; users should not launch the managed `bin\AEOPIN.exe` directly.
+
 ### Build Authority
 ```powershell
 cd authority
@@ -83,7 +100,9 @@ cargo build --release
 
 1. Update the application version in `build.gradle.kts`, `authority/src/main.rs`, and `authority/ui/authority.slint`.
 2. Build the portable archive with `.\gradlew.bat zipDistributable`.
-3. Calculate the archive SHA-256 and update `versions.json`.
-4. Push the commit and tag the release as `v<version>`.
+3. Build the Authority with `cargo build --release`.
+4. Calculate the archive SHA-256 and update `versions.json`.
+5. Upload both `aeopin-authority.exe` and `aeopin-portable.zip`.
+6. Push the commit and tag the release as `v<version>`.
 
 Core capture and retrieval remain local-first. Network access is only used by the Authority updater when checking for or downloading an explicitly requested update.

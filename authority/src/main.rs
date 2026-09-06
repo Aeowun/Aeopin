@@ -17,6 +17,9 @@ use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS};
 use windows::core::PCWSTR;
 
 const METADATA_URL: &str = "https://raw.githubusercontent.com/Aeowun/Aeopin/main/versions.json";
+const APP_NAME: &str = "AEOPIN";
+const AUTHORITY_EXE: &str = "aeopin-authority.exe";
+const CURRENT_VERSION: &str = "1.2.0";
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 struct VersionMetadata {
@@ -44,13 +47,31 @@ struct AuthorityState {
 
 impl AuthorityState {
     fn new() -> Self {
-        let app_dir = env::current_exe()
+        let authority_dir = env::current_exe()
             .expect("Failed to get current executable path")
             .parent()
             .expect("Failed to get parent directory")
             .to_path_buf();
 
-        let settings_file = app_dir.join("authority_settings.json");
+        let local_app_data = env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| authority_dir.clone());
+        let managed_dir = local_app_data.join(APP_NAME);
+        let managed_authority = managed_dir.join(AUTHORITY_EXE);
+        let install_dir = if env::current_exe().ok().as_ref() == Some(&managed_authority) {
+            managed_dir
+        } else {
+            // Portable and legacy launches are migrated into the managed location.
+            managed_dir
+        };
+
+        let settings_file = install_dir.join("authority_settings.json");
+        let installed_version_file = install_dir.join("installed.version");
+        let installed_version = fs::read_to_string(&installed_version_file)
+            .map(|version| version.trim().to_string())
+            .ok()
+            .filter(|version| !version.is_empty())
+            .unwrap_or_else(|| "0.0.0".to_string());
         let settings = if settings_file.exists() {
             let data = fs::read_to_string(&settings_file).unwrap_or_default();
             serde_json::from_str(&data).unwrap_or(AuthoritySettings { hotkey: "Alt+Shift+V".to_string() })
@@ -59,13 +80,13 @@ impl AuthorityState {
         };
 
         Self {
-            bin_dir: app_dir.join("bin"),
-            data_dir: app_dir.join("data"),
-            logs_dir: app_dir.join("logs"),
-            staging_dir: app_dir.join("staging"),
+            bin_dir: install_dir.join("bin"),
+            data_dir: install_dir.join("data"),
+            logs_dir: install_dir.join("logs"),
+            staging_dir: install_dir.join("staging"),
             settings_file,
             child_process: None,
-            current_version: "1.1.0".to_string(),
+            current_version: installed_version,
             settings,
             last_error: None,
         }
@@ -75,6 +96,11 @@ impl AuthorityState {
         let data = serde_json::to_string_pretty(&self.settings)?;
         fs::write(&self.settings_file, data)?;
         Ok(())
+    }
+
+    fn save_installed_version(&self, version: &str) -> io::Result<()> {
+        let version_file = self.bin_dir.parent().unwrap().join("installed.version");
+        fs::write(version_file, version)
     }
 
     fn is_installed(&self) -> bool {
@@ -87,6 +113,77 @@ impl AuthorityState {
         fs::create_dir_all(&self.logs_dir)?;
         fs::create_dir_all(&self.staging_dir)?;
         Ok(())
+    }
+
+    fn migrate_legacy_install(&self) -> io::Result<()> {
+        let current_exe = env::current_exe()?;
+        let legacy_root = current_exe.parent().unwrap_or(Path::new("."));
+        if legacy_root == self.bin_dir.parent().unwrap_or(Path::new(".")) {
+            return Ok(());
+        }
+        let legacy_bin = legacy_root.join("bin");
+        let legacy_data = legacy_root.join("data");
+        if legacy_bin.exists() && !self.bin_dir.exists() {
+            self.ensure_dirs()?;
+            fs::rename(&legacy_bin, &self.bin_dir)?;
+        }
+        if legacy_data.exists() && !self.data_dir.exists() {
+            self.ensure_dirs()?;
+            fs::rename(&legacy_data, &self.data_dir)?;
+        }
+        Ok(())
+    }
+
+    fn install_shortcut(&self) -> io::Result<()> {
+        let desktop = env::var_os("USERPROFILE")
+            .map(PathBuf::from)
+            .map(|p| p.join("Desktop"))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "USERPROFILE is not set"))?;
+        fs::create_dir_all(&desktop)?;
+        let shortcut = desktop.join("AEOPIN.lnk");
+        let authority = self.bin_dir.parent().unwrap().join(AUTHORITY_EXE);
+        let script = "$ws = New-Object -ComObject WScript.Shell; \
+            $sc = $ws.CreateShortcut($env:AEOPIN_SHORTCUT); \
+            $sc.TargetPath = $env:AEOPIN_TARGET; \
+            $sc.WorkingDirectory = $env:AEOPIN_WORKDIR; \
+            $sc.IconLocation = $env:AEOPIN_ICON; \
+            $sc.Description = 'AEOPIN local capture and search'; \
+            $sc.Save()";
+        let status = Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
+            .env("AEOPIN_SHORTCUT", &shortcut)
+            .env("AEOPIN_TARGET", &authority)
+            .env("AEOPIN_WORKDIR", authority.parent().unwrap())
+            .env("AEOPIN_ICON", self.bin_dir.join("AEOPIN.exe"))
+            .status()?;
+        if !status.success() {
+            return Err(io::Error::new(io::ErrorKind::Other, "Could not create desktop shortcut"));
+        }
+        Ok(())
+    }
+
+    fn install_authority_entry_point(&self) -> io::Result<()> {
+        self.ensure_dirs()?;
+        let current = env::current_exe()?;
+        let target = self.bin_dir.parent().unwrap().join(AUTHORITY_EXE);
+        if current != target {
+            let temp = target.with_extension("new");
+            fs::copy(&current, &temp)?;
+            fs::rename(temp, target)?;
+        }
+        Ok(())
+    }
+
+    fn is_newer_version(remote: &str, current: &str) -> bool {
+        fn parts(version: &str) -> Vec<u32> {
+            version.trim_start_matches('v').split('.')
+                .map(|part| part.parse::<u32>().unwrap_or(0)).collect()
+        }
+        let mut left = parts(remote);
+        let mut right = parts(current);
+        left.resize(3, 0);
+        right.resize(3, 0);
+        left > right
     }
 
     fn verify_sha256(bytes: &[u8], expected_hex: &str) -> bool {
@@ -311,7 +408,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     move || { if let Some(ui) = ui_weak.upgrade() { ui.set_status_text(slint::format!("Extracting...")); ui.set_progress(0.99); } }
                 }).unwrap();
 
+                s.migrate_legacy_install()?;
                 s.install_from_zip_bytes(&bytes)?;
+                s.install_authority_entry_point()?;
+                s.install_shortcut()?;
+                s.save_installed_version(CURRENT_VERSION)?;
                 Ok(())
             })();
 
@@ -429,7 +530,15 @@ fn main() -> Result<(), slint::PlatformError> {
                     s.current_version.clone()
                 };
 
-                if meta.version == current {
+                if !AuthorityState::is_newer_version(&meta.version, &current) {
+                    slint::invoke_from_event_loop({
+                        let ui_weak = ui_weak.clone();
+                        move || {
+                            if let Some(ui) = ui_weak.upgrade() {
+                                ui.set_status_text(slint::format!("AEOPIN is up to date (v{}).", current));
+                            }
+                        }
+                    }).unwrap();
                     return Ok(());
                 }
 
@@ -452,7 +561,11 @@ fn main() -> Result<(), slint::PlatformError> {
 
                 let mut s = state.lock().unwrap();
                 s.stop_app();
+                s.migrate_legacy_install()?;
                 s.install_from_zip_bytes(&bytes)?;
+                s.install_authority_entry_point()?;
+                s.install_shortcut()?;
+                s.save_installed_version(&meta.version)?;
                 s.current_version = meta.version.clone();
                 Ok(())
             })();
@@ -499,7 +612,11 @@ fn main() -> Result<(), slint::PlatformError> {
 
                 let mut s = state.lock().unwrap();
                 s.stop_app();
+                s.migrate_legacy_install()?;
                 s.install_from_zip_bytes(&bytes)?;
+                s.install_authority_entry_point()?;
+                s.install_shortcut()?;
+                s.save_installed_version(CURRENT_VERSION)?;
                 Ok(())
             })();
 
@@ -572,4 +689,17 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     run_res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AuthorityState;
+
+    #[test]
+    fn compares_semantic_versions_without_downgrading() {
+        assert!(AuthorityState::is_newer_version("1.2.0", "1.1.0"));
+        assert!(AuthorityState::is_newer_version("v1.10.0", "1.2.0"));
+        assert!(!AuthorityState::is_newer_version("1.2.0", "1.2.0"));
+        assert!(!AuthorityState::is_newer_version("1.1.9", "1.2.0"));
+    }
 }
