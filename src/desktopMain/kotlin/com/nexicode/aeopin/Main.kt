@@ -282,6 +282,13 @@ val appModule = module {
             piCols.close()
 
             if (isStagedPathNotNull || colNames.contains("rawContent") || !colNames.contains("stagedPath")) {
+                val recoveryCopy = File(
+                    dbFile.parentFile,
+                    "aeopin-recovery-${System.currentTimeMillis()}.db"
+                )
+                if (dbFile.exists()) {
+                    dbFile.copyTo(recoveryCopy, overwrite = false)
+                }
                 conn.createStatement().use { stmt ->
                     stmt.execute("DROP TABLE IF EXISTS PendingIngestion;")
                     stmt.execute("""
@@ -380,6 +387,28 @@ val appModule = module {
                         VALUES (new.id, new.originalName, new.metadataJson);
                     END
                     """.trimIndent()
+                )
+            }
+
+            val requiredObjects = listOf(
+                "AeopinItems",
+                "PendingIngestion",
+                "AeopinItemsFts",
+                "aeopin_items_insert",
+                "aeopin_items_delete",
+                "aeopin_items_update"
+            )
+            val missingObjects = requiredObjects.filterNot { objectName ->
+                conn.prepareStatement(
+                    "SELECT 1 FROM sqlite_master WHERE name = ? LIMIT 1"
+                ).use { statement ->
+                    statement.setString(1, objectName)
+                    statement.executeQuery().use { result -> result.next() }
+                }
+            }
+            if (missingObjects.isNotEmpty()) {
+                throw IllegalStateException(
+                    "AEOPIN database schema is incomplete: ${missingObjects.joinToString()}"
                 )
             }
 

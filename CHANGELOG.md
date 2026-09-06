@@ -6,10 +6,24 @@ All notable AEOPIN changes are documented here.
 
 ### Fixed
 
+- The installer no longer trusts a stale `aeopin-portable.zip` found beside the Authority; local packages must match the SHA-256 in the current published metadata.
+- Installation and repair now persist the package version returned by release metadata instead of assuming the Authority's compile-time version.
+- Failed payload swaps attempt to restore the previous application directory instead of leaving the managed install empty.
 - Existing AEOPIN processes are stopped before installation and launch, preventing the older installed version from winning the single-instance lock.
 - Legacy installed application directories are migrated before the new payload is extracted.
 - The Authority helper functions now compile correctly in release and test builds.
 - README and release metadata identify the corrected installer build.
+
+## [1.2.2] - 2026-09-06
+
+### Fixed
+
+- Launch now checks the release manifest first and repairs or updates the managed payload before starting it.
+- Managed payloads carry a verified version marker; the Authority refuses to launch a missing or mismatched executable.
+- Process shutdown waits for older AEOPIN processes to disappear instead of assuming `taskkill` completed.
+- Install, update, and repair launch the verified payload only after the replacement succeeds.
+- Authority failures now offer direct support and install-instruction links.
+- Database bootstrap validates required tables, FTS objects, and triggers, and preserves a recovery copy before destructive journal repair.
 
 ## [1.2.0] - 2026-09-05
 

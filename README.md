@@ -1,4 +1,4 @@
-# AEOPIN v1.2.1
+# AEOPIN v1.2.2
 
 AEOPIN is a Windows capture tool.
 
@@ -11,7 +11,7 @@ The core workflow is **one-key capture from anywhere plus instant searchable rec
 - Search saved items by filename, path, extension, URL, domain, title, or text.
 - Drag saved files and folders back out when you need them.
 
-Version 1.2.1 improves installation, entry-point, update, and desktop shortcut behavior on Windows. See [CHANGELOG.md](CHANGELOG.md) for release details. Version 1.1.0 introduced global hotkey reliability, structured link metadata, HTML link drops, and searchable file metadata.
+Version 1.2.2 hardens installation, update, launch verification, process shutdown, and database recovery on Windows. See [CHANGELOG.md](CHANGELOG.md) for release details. Version 1.1.0 introduced global hotkey reliability, structured link metadata, HTML link drops, and searchable file metadata.
 
 ## Architecture
 
@@ -34,17 +34,18 @@ AEOPIN/
 
 ### Windows installation
 
-Download `aeopin-authority.exe` and `aeopin-portable.zip` from the same release and run the Authority executable. It installs the application under `%LOCALAPPDATA%\AEOPIN`, creates `AEOPIN.lnk` on the current user's desktop, and launches the managed application from that installation.
+Download `aeopin-authority.exe` from the latest release and run it. The Authority downloads and verifies the matching portable payload automatically, installs the application under `%LOCALAPPDATA%\AEOPIN`, creates `AEOPIN.lnk` on the current user's desktop, and launches the managed application from that installation. Keeping `aeopin-portable.zip` beside the Authority is supported for a one-download/offline handoff, but it is accepted only when its SHA-256 matches the release manifest.
 
 The Authority can be run again safely:
 
 - A first install creates the managed `bin`, `data`, and `logs` directories.
 - Existing v1.1 or older portable folders are migrated into `%LOCALAPPDATA%\AEOPIN` when possible.
 - Existing `data` is preserved during install, repair, and update.
-- Updates stop the managed app, replace only the application payload, recreate the shortcut, and leave user data in place.
+- Updates check the release manifest before launch, stop the managed app and older conflicting processes, replace only the verified application payload, recreate the shortcut, validate the managed version, and leave user data in place.
+- If any lifecycle step cannot be completed, the Authority stays fail-closed, explains the failed step, and provides Support and Install Instructions actions.
 - Running an older Authority against a newer installed payload does not downgrade it; updates are applied only when the remote semantic version is newer.
 
-For offline installation, keep both files together. The Authority uses the local portable archive when present and otherwise downloads and verifies the archive using the SHA-256 value in `versions.json`.
+The Authority fetches `versions.json` before installing. If `aeopin-portable.zip` is beside the Authority, it is used only when its SHA-256 exactly matches the published metadata; otherwise it downloads the verified release archive. This prevents an old local ZIP from being installed by a newer Authority.
 
 
 ## Data & Privacy
@@ -98,11 +99,11 @@ cargo build --release
 
 ### Release checklist
 
-1. Update the application version in `build.gradle.kts`, `authority/src/main.rs`, and `authority/ui/authority.slint`.
+1. Update the application version in `build.gradle.kts`, `authority/Cargo.toml`, `authority/src/main.rs`, and `authority/ui/authority.slint`.
 2. Build the portable archive with `.\gradlew.bat zipDistributable`.
 3. Build the Authority with `cargo build --release`.
 4. Calculate the archive SHA-256 and update `versions.json`.
 5. Upload both `aeopin-authority.exe` and `aeopin-portable.zip`.
-6. Push the commit and tag the release as `v<version>`.
+6. Publish the GitHub release (do not leave it as a draft), then push the commit and tag the release as `v<version>`.
 
 Core capture and retrieval remain local-first. Network access is only used by the Authority updater when checking for or downloading an explicitly requested update.

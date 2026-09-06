@@ -7,7 +7,7 @@ export component AuthorityWindow inherits Window {
     background: #1e1e1e;
 
     in-out property <string> status_text: "AEOPIN is ready to install.";
-    in-out property <string> app_version: "1.2.1";
+    in-out property <string> app_version: "1.2.2";
     in-out property <float> progress: 0.0;
     in-out property <bool> is_working: false;
     in-out property <string> state: "not_installed"; // not_installed, installed, running, error, settings
@@ -21,6 +21,8 @@ export component AuthorityWindow inherits Window {
     callback back_clicked();
     callback save_settings_clicked(string);
     callback copy_error_report_clicked();
+    callback support_clicked();
+    callback install_instructions_clicked();
 
     VerticalBox {
         padding: 20px;
@@ -104,6 +106,14 @@ export component AuthorityWindow inherits Window {
                 Button {
                     text: "Copy Error Report";
                     clicked => { root.copy_error_report_clicked(); }
+                }
+                Button {
+                    text: "Open AEOPIN Support";
+                    clicked => { root.support_clicked(); }
+                }
+                Button {
+                    text: "Open Install Instructions";
+                    clicked => { root.install_instructions_clicked(); }
                 }
             }
         }
