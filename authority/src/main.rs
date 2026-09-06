@@ -19,7 +19,7 @@ use windows::core::PCWSTR;
 const METADATA_URL: &str = "https://raw.githubusercontent.com/Aeowun/Aeopin/main/versions.json";
 const APP_NAME: &str = "AEOPIN";
 const AUTHORITY_EXE: &str = "aeopin-authority.exe";
-const CURRENT_VERSION: &str = "1.2.0";
+const CURRENT_VERSION: &str = "1.2.1";
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 struct VersionMetadata {
@@ -117,21 +117,43 @@ impl AuthorityState {
 
     fn migrate_legacy_install(&self) -> io::Result<()> {
         let current_exe = env::current_exe()?;
-        let legacy_root = current_exe.parent().unwrap_or(Path::new("."));
-        if legacy_root == self.bin_dir.parent().unwrap_or(Path::new(".")) {
-            return Ok(());
+        let managed_root = self.bin_dir.parent().unwrap();
+        let mut roots = vec![current_exe.parent().unwrap_or(Path::new(".")).to_path_buf()];
+        if let Some(local_app_data) = env::var_os("LOCALAPPDATA").map(PathBuf::from) {
+            roots.push(local_app_data.join("Programs").join(APP_NAME));
         }
-        let legacy_bin = legacy_root.join("bin");
-        let legacy_data = legacy_root.join("data");
-        if legacy_bin.exists() && !self.bin_dir.exists() {
-            self.ensure_dirs()?;
-            fs::rename(&legacy_bin, &self.bin_dir)?;
+        if let Some(program_files) = env::var_os("ProgramFiles").map(PathBuf::from) {
+            roots.push(program_files.join(APP_NAME));
         }
-        if legacy_data.exists() && !self.data_dir.exists() {
-            self.ensure_dirs()?;
-            fs::rename(&legacy_data, &self.data_dir)?;
+        if let Some(program_files_x86) = env::var_os("ProgramFiles(x86)").map(PathBuf::from) {
+            roots.push(program_files_x86.join(APP_NAME));
+        }
+
+        for legacy_root in roots {
+            if legacy_root == managed_root || !legacy_root.exists() {
+                continue;
+            }
+            let legacy_bin = legacy_root.join("bin");
+            let legacy_data = legacy_root.join("data");
+            if legacy_bin.exists() && !self.bin_dir.exists() {
+                self.ensure_dirs()?;
+                move_directory(&legacy_bin, &self.bin_dir)?;
+            }
+            if legacy_data.exists() && !self.data_dir.exists() {
+                self.ensure_dirs()?;
+                move_directory(&legacy_data, &self.data_dir)?;
+            }
+            // Best-effort cleanup removes old application payloads but never user data.
+            let _ = fs::remove_dir_all(&legacy_bin);
+            let _ = fs::remove_file(legacy_root.join(AUTHORITY_EXE));
         }
         Ok(())
+    }
+
+    fn stop_existing_app(&self) {
+        let _ = Command::new("taskkill")
+            .args(["/IM", "AEOPIN.exe", "/T", "/F"])
+            .output();
     }
 
     fn install_shortcut(&self) -> io::Result<()> {
@@ -240,6 +262,7 @@ impl AuthorityState {
     }
 
     fn launch(&mut self) -> io::Result<Child> {
+        self.stop_existing_app();
         let exe_path = self.bin_dir.join("AEOPIN.exe");
 
         self.ensure_dirs()?;
@@ -320,6 +343,33 @@ fn download_with_progress(url: &str, ui_handle: slint::Weak<AuthorityWindow>) ->
     Ok(buffer)
 }
 
+fn move_directory(source: &Path, target: &Path) -> io::Result<()> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    match fs::rename(source, target) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            copy_directory(source, target)?;
+            fs::remove_dir_all(source)
+        }
+    }
+}
+
+fn copy_directory(source: &Path, target: &Path) -> io::Result<()> {
+    fs::create_dir_all(target)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let destination = target.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_directory(&entry.path(), &destination)?;
+        } else {
+            fs::copy(entry.path(), destination)?;
+        }
+    }
+    Ok(())
+}
+
 fn fetch_metadata() -> io::Result<VersionMetadata> {
     let client = reqwest::blocking::Client::new();
     let response = client.get(METADATA_URL).send().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
@@ -370,6 +420,7 @@ fn main() -> Result<(), slint::PlatformError> {
         thread::spawn(move || {
             let res = (|| -> io::Result<()> {
                 let s = state.lock().unwrap();
+                s.stop_existing_app();
                 let zip_path = Path::new("aeopin-portable.zip");
 
                 let bytes = if zip_path.exists() {
@@ -422,6 +473,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.set_is_working(false);
                     match res {
                         Ok(_) => {
+                            ui.set_app_version(slint::format!("{}", CURRENT_VERSION));
                             ui.set_state(slint::format!("installed"));
                             ui.set_status_text(slint::format!("Installation complete."));
                         }
@@ -562,6 +614,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
                 let mut s = state.lock().unwrap();
                 s.stop_app();
+                s.stop_existing_app();
                 s.migrate_legacy_install()?;
                 s.install_from_zip_bytes(&bytes)?;
                 s.install_authority_entry_point()?;
@@ -613,6 +666,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
                 let mut s = state.lock().unwrap();
                 s.stop_app();
+                s.stop_existing_app();
                 s.migrate_legacy_install()?;
                 s.install_from_zip_bytes(&bytes)?;
                 s.install_authority_entry_point()?;
@@ -626,6 +680,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.set_is_working(false);
                     match res {
                         Ok(_) => {
+                            ui.set_app_version(slint::format!("{}", CURRENT_VERSION));
                             ui.set_state(slint::format!("installed"));
                             ui.set_status_text(slint::format!("Repair complete."));
                         }

@@ -1,4 +1,4 @@
-# AEOPIN v1.2.0
+# AEOPIN v1.2.1
 
 AEOPIN is a Windows capture tool.
 
@@ -11,7 +11,7 @@ The core workflow is **one-key capture from anywhere plus instant searchable rec
 - Search saved items by filename, path, extension, URL, domain, title, or text.
 - Drag saved files and folders back out when you need them.
 
-Version 1.2.0 improves installation, entry-point, update, and desktop shortcut behavior on Windows. Version 1.1.0 introduced global hotkey reliability, structured link metadata, HTML link drops, and searchable file metadata.
+Version 1.2.1 improves installation, entry-point, update, and desktop shortcut behavior on Windows. See [CHANGELOG.md](CHANGELOG.md) for release details. Version 1.1.0 introduced global hotkey reliability, structured link metadata, HTML link drops, and searchable file metadata.
 
 ## Architecture
 
