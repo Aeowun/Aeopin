@@ -1,4 +1,4 @@
-# AEOPIN v1.2.2
+# AEOPIN v1.2.3
 
 AEOPIN is a Windows capture tool.
 

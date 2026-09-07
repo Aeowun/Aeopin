@@ -2,6 +2,13 @@
 
 All notable AEOPIN changes are documented here.
 
+## [1.2.3] - 2026-09-06
+
+### Stability & Distribution Hardening
+- **Authority Recovery Logic**: Implemented transaction-based installation recovery and payload validation.
+- **Process Management**: Integrated force-stop and active monitoring for the managed application process.
+- **Migration**: Added automatic migration for legacy installations in common Windows paths.
+
 ## [1.2.1] - 2026-09-05
 
 ### Fixed

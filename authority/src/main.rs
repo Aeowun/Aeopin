@@ -21,7 +21,7 @@ const APP_NAME: &str = "AEOPIN";
 const AUTHORITY_EXE: &str = "aeopin-authority.exe";
 const PACKAGE_FILE: &str = "aeopin-portable.zip";
 const LEGACY_PACKAGE_FILE: &str = "Aeopin-win-Portable.zip";
-const CURRENT_VERSION: &str = "1.2.2";
+const CURRENT_VERSION: &str = "1.2.3";
 const SUPPORT_URL: &str = "https://Aeowun.com";
 const INSTALL_URL: &str = "https://github.com/Aeowun/Aeopin/releases/latest";
 
