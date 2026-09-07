@@ -19,7 +19,11 @@ use windows::core::PCWSTR;
 const METADATA_URL: &str = "https://raw.githubusercontent.com/Aeowun/Aeopin/main/versions.json";
 const APP_NAME: &str = "AEOPIN";
 const AUTHORITY_EXE: &str = "aeopin-authority.exe";
-const CURRENT_VERSION: &str = "1.2.0";
+const PACKAGE_FILE: &str = "aeopin-portable.zip";
+const LEGACY_PACKAGE_FILE: &str = "Aeopin-win-Portable.zip";
+const CURRENT_VERSION: &str = "1.2.3";
+const SUPPORT_URL: &str = "https://Aeowun.com";
+const INSTALL_URL: &str = "https://github.com/Aeowun/Aeopin/releases/latest";
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 struct VersionMetadata {
@@ -100,11 +104,32 @@ impl AuthorityState {
 
     fn save_installed_version(&self, version: &str) -> io::Result<()> {
         let version_file = self.bin_dir.parent().unwrap().join("installed.version");
-        fs::write(version_file, version)
+        fs::write(version_file, version)?;
+        fs::write(self.bin_dir.join("AEOPIN.version"), version)
     }
 
     fn is_installed(&self) -> bool {
-        self.bin_dir.exists() && self.bin_dir.join("AEOPIN.exe").exists()
+        self.validate_managed_payload().is_ok()
+    }
+
+    fn validate_managed_payload(&self) -> io::Result<()> {
+        let executable = self.bin_dir.join("AEOPIN.exe");
+        if !executable.is_file() {
+            return Err(io::Error::new(io::ErrorKind::NotFound, "Managed AEOPIN.exe is missing"));
+        }
+        let payload_version = fs::read_to_string(self.bin_dir.join("AEOPIN.version"))
+            .map(|version| version.trim().to_string())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Managed payload version is missing"))?;
+        if payload_version != self.current_version || payload_version == "0.0.0" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Managed payload version {} does not match expected {}",
+                    payload_version, self.current_version
+                ),
+            ));
+        }
+        Ok(())
     }
 
     fn ensure_dirs(&self) -> io::Result<()> {
@@ -117,21 +142,57 @@ impl AuthorityState {
 
     fn migrate_legacy_install(&self) -> io::Result<()> {
         let current_exe = env::current_exe()?;
-        let legacy_root = current_exe.parent().unwrap_or(Path::new("."));
-        if legacy_root == self.bin_dir.parent().unwrap_or(Path::new(".")) {
-            return Ok(());
+        let managed_root = self.bin_dir.parent().unwrap();
+        let mut roots = vec![current_exe.parent().unwrap_or(Path::new(".")).to_path_buf()];
+        if let Some(local_app_data) = env::var_os("LOCALAPPDATA").map(PathBuf::from) {
+            roots.push(local_app_data.join("Programs").join(APP_NAME));
         }
-        let legacy_bin = legacy_root.join("bin");
-        let legacy_data = legacy_root.join("data");
-        if legacy_bin.exists() && !self.bin_dir.exists() {
-            self.ensure_dirs()?;
-            fs::rename(&legacy_bin, &self.bin_dir)?;
+        if let Some(program_files) = env::var_os("ProgramFiles").map(PathBuf::from) {
+            roots.push(program_files.join(APP_NAME));
         }
-        if legacy_data.exists() && !self.data_dir.exists() {
-            self.ensure_dirs()?;
-            fs::rename(&legacy_data, &self.data_dir)?;
+        if let Some(program_files_x86) = env::var_os("ProgramFiles(x86)").map(PathBuf::from) {
+            roots.push(program_files_x86.join(APP_NAME));
+        }
+
+        for legacy_root in roots {
+            if legacy_root == managed_root || !legacy_root.exists() {
+                continue;
+            }
+            let legacy_bin = legacy_root.join("bin");
+            let legacy_data = legacy_root.join("data");
+            if legacy_bin.exists() && !self.bin_dir.exists() {
+                self.ensure_dirs()?;
+                move_directory(&legacy_bin, &self.bin_dir)?;
+            }
+            if legacy_data.exists() && !self.data_dir.exists() {
+                self.ensure_dirs()?;
+                move_directory(&legacy_data, &self.data_dir)?;
+            }
+            // Best-effort cleanup removes old application payloads but never user data.
+            let _ = fs::remove_dir_all(&legacy_bin);
+            let _ = fs::remove_file(legacy_root.join(AUTHORITY_EXE));
         }
         Ok(())
+    }
+
+    fn stop_existing_app(&self) -> io::Result<()> {
+        let _ = Command::new("taskkill")
+            .args(["/IM", "AEOPIN.exe", "/T", "/F"])
+            .output();
+        for _ in 0..20 {
+            let running = Command::new("tasklist")
+                .args(["/FI", "IMAGENAME eq AEOPIN.exe", "/FO", "CSV", "/NH"])
+                .output()?
+                .stdout;
+            if !String::from_utf8_lossy(&running).contains("AEOPIN.exe") {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            "An older AEOPIN process could not be stopped",
+        ))
     }
 
     fn install_shortcut(&self) -> io::Result<()> {
@@ -216,10 +277,18 @@ impl AuthorityState {
                     if !p.exists() {
                         fs::create_dir_all(p)?;
                     }
+
                 }
                 let mut outfile = fs::File::create(&outpath)?;
                 io::copy(&mut file, &mut outfile)?;
             }
+        }
+
+        if !self.staging_dir.join("AEOPIN.exe").is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Package does not contain the required AEOPIN.exe",
+            ));
         }
 
         let bin_old = self.bin_dir.with_extension("old");
@@ -230,7 +299,12 @@ impl AuthorityState {
             fs::rename(&self.bin_dir, &bin_old)?;
         }
 
-        fs::rename(&self.staging_dir, &self.bin_dir)?;
+        if let Err(error) = fs::rename(&self.staging_dir, &self.bin_dir) {
+            if bin_old.exists() && !self.bin_dir.exists() {
+                let _ = fs::rename(&bin_old, &self.bin_dir);
+            }
+            return Err(error);
+        }
 
         if bin_old.exists() {
             let _ = fs::remove_dir_all(&bin_old);
@@ -240,6 +314,8 @@ impl AuthorityState {
     }
 
     fn launch(&mut self) -> io::Result<Child> {
+        self.validate_managed_payload()?;
+        self.stop_existing_app()?;
         let exe_path = self.bin_dir.join("AEOPIN.exe");
 
         self.ensure_dirs()?;
@@ -320,13 +396,167 @@ fn download_with_progress(url: &str, ui_handle: slint::Weak<AuthorityWindow>) ->
     Ok(buffer)
 }
 
+fn move_directory(source: &Path, target: &Path) -> io::Result<()> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    match fs::rename(source, target) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            copy_directory(source, target)?;
+            fs::remove_dir_all(source)
+        }
+    }
+}
+
+fn copy_directory(source: &Path, target: &Path) -> io::Result<()> {
+    fs::create_dir_all(target)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let destination = target.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_directory(&entry.path(), &destination)?;
+        } else {
+            fs::copy(entry.path(), destination)?;
+        }
+    }
+    Ok(())
+}
+
 fn fetch_metadata() -> io::Result<VersionMetadata> {
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     let response = client.get(METADATA_URL).send().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     if !response.status().is_success() {
         return Err(io::Error::new(io::ErrorKind::Other, format!("Failed to fetch metadata: {}", response.status())));
     }
+
     response.json().map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+}
+
+fn open_url(url: &str) -> io::Result<()> {
+    let status = Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::new(io::ErrorKind::Other, "Could not open support link"))
+    }
+}
+
+fn load_verified_package(
+    metadata: &VersionMetadata,
+    ui_handle: slint::Weak<AuthorityWindow>,
+) -> io::Result<Vec<u8>> {
+    let release_dir = env::current_exe()?
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Authority has no parent directory"))?
+        .to_path_buf();
+    for name in [PACKAGE_FILE, LEGACY_PACKAGE_FILE] {
+        let local_package = release_dir.join(name);
+        if local_package.is_file() {
+            let local_bytes = fs::read(&local_package)?;
+            if AuthorityState::verify_sha256(&local_bytes, &metadata.sha256) {
+                let version = metadata.version.clone();
+                slint::invoke_from_event_loop({
+                    let ui_handle = ui_handle.clone();
+                    move || {
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_status_text(slint::format!(
+                                "Using verified AEOPIN v{} package...",
+                                version
+                            ));
+                        }
+                    }
+                }).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                return Ok(local_bytes);
+            }
+        }
+    }
+
+    let version = metadata.version.clone();
+    slint::invoke_from_event_loop({
+        let ui_handle = ui_handle.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_status_text(slint::format!(
+                    "Downloading AEOPIN v{}...",
+                    version
+                ));
+            }
+        }
+    }).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+    let bytes = download_with_progress(&metadata.url, ui_handle)?;
+    if !AuthorityState::verify_sha256(&bytes, &metadata.sha256) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "SHA-256 verification failed",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn install_verified_metadata(
+    state: &mut AuthorityState,
+    metadata: &VersionMetadata,
+    ui_handle: slint::Weak<AuthorityWindow>,
+) -> io::Result<()> {
+    let bytes = load_verified_package(metadata, ui_handle)?;
+    state.stop_app();
+    state.stop_existing_app()?;
+    state.migrate_legacy_install()?;
+    state.install_from_zip_bytes(&bytes)?;
+    state.install_authority_entry_point()?;
+    state.install_shortcut()?;
+    state.save_installed_version(&metadata.version)?;
+    state.current_version = metadata.version.clone();
+    Ok(())
+}
+
+fn monitor_child(
+    state: Arc<Mutex<AuthorityState>>,
+    child: Child,
+    ui_handle: slint::Weak<AuthorityWindow>,
+) {
+    let child_arc = Arc::new(Mutex::new(child));
+    if let Ok(mut state_guard) = state.lock() {
+        state_guard.child_process = Some(child_arc.clone());
+    }
+    thread::spawn(move || {
+        let started = std::time::Instant::now();
+        let result = child_arc.lock().map_err(|_| {
+            io::Error::new(io::ErrorKind::Other, "Application process lock failed")
+        }).and_then(|mut child| child.wait().map_err(io::Error::from));
+        let short_lived = started.elapsed() < Duration::from_secs(5);
+        let failure = match &result {
+            Ok(status) if status.success() && !short_lived => None,
+            Ok(status) if short_lived => Some("AEOPIN stopped during startup".to_string()),
+            Ok(status) => Some(format!("AEOPIN exited with status {}", status)),
+            Err(error) => Some(format!("AEOPIN process error: {}", error)),
+        };
+        if let Ok(mut state_guard) = state.lock() {
+            state_guard.child_process = None;
+            state_guard.last_error = failure.clone();
+        }
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                if let Some(error) = failure {
+                    ui.set_state(slint::format!("error"));
+                    ui.set_status_text(slint::format!(
+                        "{}. Use Support or Install Instructions below.",
+                        error
+                    ));
+                } else {
+                    ui.set_state(slint::format!("installed"));
+                    ui.set_status_text(slint::format!("AEOPIN exited normally."));
+                }
+            }
+        });
+    });
 }
 
 fn main() -> Result<(), slint::PlatformError> {
@@ -369,40 +599,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let ui_weak = ui_handle.clone();
         thread::spawn(move || {
             let res = (|| -> io::Result<()> {
-                let s = state.lock().unwrap();
-                let zip_path = Path::new("aeopin-portable.zip");
-
-                let bytes = if zip_path.exists() {
-                    slint::invoke_from_event_loop({
-                        let ui_weak = ui_weak.clone();
-                        move || { if let Some(ui) = ui_weak.upgrade() { ui.set_status_text(slint::format!("Using local package...")); } }
-                    }).unwrap();
-                    fs::read(zip_path)?
-                } else {
-                    slint::invoke_from_event_loop({
-                        let ui_weak = ui_weak.clone();
-                        move || { if let Some(ui) = ui_weak.upgrade() { ui.set_status_text(slint::format!("Fetching metadata...")); } }
-                    }).unwrap();
-
-                    let meta = fetch_metadata()?;
-
-                    slint::invoke_from_event_loop({
-                        let ui_weak = ui_weak.clone();
-                        move || { if let Some(ui) = ui_weak.upgrade() { ui.set_status_text(slint::format!("Downloading...")); } }
-                    }).unwrap();
-
-                    let data = download_with_progress(&meta.url, ui_weak.clone())?;
-
-                    slint::invoke_from_event_loop({
-                        let ui_weak = ui_weak.clone();
-                        move || { if let Some(ui) = ui_weak.upgrade() { ui.set_status_text(slint::format!("Verifying...")); } }
-                    }).unwrap();
-
-                    if !AuthorityState::verify_sha256(&data, &meta.sha256) {
-                        return Err(io::Error::new(io::ErrorKind::InvalidData, "SHA-256 verification failed"));
-                    }
-                    data
-                };
+                let mut s = state.lock().unwrap();
+                s.stop_existing_app()?;
+                let meta = fetch_metadata()?;
+                let bytes = load_verified_package(&meta, ui_weak.clone())?;
 
                 slint::invoke_from_event_loop({
                     let ui_weak = ui_weak.clone();
@@ -413,7 +613,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 s.install_from_zip_bytes(&bytes)?;
                 s.install_authority_entry_point()?;
                 s.install_shortcut()?;
-                s.save_installed_version(CURRENT_VERSION)?;
+                s.save_installed_version(&meta.version)?;
+                s.current_version = meta.version.clone();
+                let child = s.launch()?;
+                drop(s);
+                monitor_child(state.clone(), child, ui_weak.clone());
                 Ok(())
             })();
 
@@ -422,6 +626,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.set_is_working(false);
                     match res {
                         Ok(_) => {
+                            let installed_version = state.lock()
+                                .map(|state| state.current_version.clone())
+                                .unwrap_or_else(|_| CURRENT_VERSION.to_string());
+                            ui.set_app_version(slint::format!("{}", installed_version));
                             ui.set_state(slint::format!("installed"));
                             ui.set_status_text(slint::format!("Installation complete."));
                         }
@@ -442,75 +650,46 @@ fn main() -> Result<(), slint::PlatformError> {
     let state_clone = state.clone();
     ui.on_launch_clicked(move || {
         let ui = ui_handle.upgrade().unwrap();
-        let mut s = state_clone.lock().unwrap();
+        ui.set_is_working(true);
+        ui.set_status_text(slint::format!("Checking for updates before launch..."));
 
-        if s.child_process.is_some() {
-            return;
-        }
+        let ui_weak = ui_handle.clone();
+        let state = state_clone.clone();
+        let monitor_state = state_clone.clone();
+        thread::spawn(move || {
+            let result = (|| -> io::Result<()> {
+                let metadata = fetch_metadata()?;
+                let mut state = state.lock().unwrap();
+                let needs_update = state.validate_managed_payload().is_err()
+                    || AuthorityState::is_newer_version(&metadata.version, &state.current_version);
+                if needs_update {
+                    install_verified_metadata(&mut state, &metadata, ui_weak.clone())?;
+                }
+                let child = state.launch()?;
+                drop(state);
+                monitor_child(monitor_state, child, ui_weak.clone());
+                Ok(())
+            })();
 
-        match s.launch() {
-            Ok(child) => {
-                let child_arc = Arc::new(Mutex::new(child));
-                s.child_process = Some(child_arc.clone());
-                ui.set_state(slint::format!("running"));
-                ui.set_status_text(slint::format!("AEOPIN is running."));
-
-                let ui_weak = ui_handle.clone();
-                let state_mon = state_clone.clone();
-                thread::spawn(move || {
-                    let start_time = std::time::Instant::now();
-                    let wait_res = {
-                        let mut child = child_arc.lock().unwrap();
-                        child.wait()
-                    };
-                    let duration = start_time.elapsed();
-
-                    let mut s = state_mon.lock().unwrap();
-                    s.child_process = None;
-
-                    let is_short_lived = duration < std::time::Duration::from_secs(5);
-                    let last_err = match &wait_res {
-                        Ok(status) if !status.success() || is_short_lived => {
-                            if is_short_lived {
-                                Some(format!("Application crashed on startup ({}s). Check logs.", duration.as_secs()))
-                            } else {
-                                Some(format!("Exit status: {}", status))
-                            }
-                        },
-                        Err(e) => Some(e.to_string()),
-                        _ if is_short_lived => Some(format!("Application closed unexpectedly after {}s.", duration.as_secs())),
-                        _ => None,
-                    };
-                    if let Some(err) = last_err.clone() {
-                        s.last_error = Some(err);
-                    }
-
-                    slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = ui_weak.upgrade() {
-                            match wait_res {
-                                Ok(status) if status.success() && !is_short_lived => {
-                                    ui.set_state(slint::format!("installed"));
-                                    ui.set_status_text(slint::format!("AEOPIN exited normally."));
-                                }
-                                _ => {
-                                    ui.set_state(slint::format!("error"));
-                                    if is_short_lived {
-                                        ui.set_status_text(slint::format!("AEOPIN crashed on startup."));
-                                    } else {
-                                        ui.set_status_text(slint::format!("AEOPIN stopped unexpectedly."));
-                                    }
-                                }
-                            }
+            slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_is_working(false);
+                    match result {
+                        Ok(_) => {
+                            ui.set_state(slint::format!("running"));
+                            ui.set_status_text(slint::format!("AEOPIN is running."));
                         }
-                    }).unwrap();
-                });
-            }
-            Err(e) => {
-                s.last_error = Some(e.to_string());
-                ui.set_state(slint::format!("error"));
-                ui.set_status_text(slint::format!("Failed to launch: {}", e));
-            }
-        }
+                        Err(error) => {
+                            ui.set_state(slint::format!("error"));
+                            ui.set_status_text(slint::format!(
+                                "AEOPIN could not start: {}. Use Support or Install Instructions below.",
+                                error
+                            ));
+                        }
+                    }
+                }
+            }).unwrap();
+        });
     });
 
     let ui_handle = ui.as_weak();
@@ -549,25 +728,20 @@ fn main() -> Result<(), slint::PlatformError> {
                     move || { if let Some(ui) = ui_weak.upgrade() { ui.set_status_text(slint::format!("Downloading v{}...", ver)); } }
                 }).unwrap();
 
-                let bytes = download_with_progress(&meta.url, ui_weak.clone())?;
-
-                slint::invoke_from_event_loop({
-                    let ui_weak = ui_weak.clone();
-                    move || { if let Some(ui) = ui_weak.upgrade() { ui.set_status_text(slint::format!("Verifying...")); } }
-                }).unwrap();
-
-                if !AuthorityState::verify_sha256(&bytes, &meta.sha256) {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "SHA-256 verification failed"));
-                }
+                let bytes = load_verified_package(&meta, ui_weak.clone())?;
 
                 let mut s = state.lock().unwrap();
                 s.stop_app();
+                s.stop_existing_app()?;
                 s.migrate_legacy_install()?;
                 s.install_from_zip_bytes(&bytes)?;
                 s.install_authority_entry_point()?;
                 s.install_shortcut()?;
                 s.save_installed_version(&meta.version)?;
                 s.current_version = meta.version.clone();
+                let child = s.launch()?;
+                drop(s);
+                monitor_child(state.clone(), child, ui_weak.clone());
                 Ok(())
             })();
 
@@ -576,10 +750,15 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.set_is_working(false);
                     match res {
                         Ok(_) => {
+                            let installed_version = state.lock()
+                                .map(|state| state.current_version.clone())
+                                .unwrap_or_else(|_| CURRENT_VERSION.to_string());
+                            ui.set_app_version(slint::format!("{}", installed_version));
                             ui.set_state(slint::format!("installed"));
                             ui.set_status_text(slint::format!("Update complete."));
                         }
                         Err(e) => {
+                            ui.set_state(slint::format!("error"));
                             ui.set_status_text(slint::format!("Update failed: {}", e));
                         }
                     }
@@ -599,25 +778,19 @@ fn main() -> Result<(), slint::PlatformError> {
         let state = state_clone.clone();
         thread::spawn(move || {
             let res = (|| -> io::Result<()> {
-                let zip_path = Path::new("aeopin-portable.zip");
-                let bytes = if zip_path.exists() {
-                    fs::read(zip_path)?
-                } else {
-                    let meta = fetch_metadata()?;
-                    let data = download_with_progress(&meta.url, ui_weak.clone())?;
-                    if !AuthorityState::verify_sha256(&data, &meta.sha256) {
-                        return Err(io::Error::new(io::ErrorKind::InvalidData, "SHA-256 verification failed"));
-                    }
-                    data
-                };
+                let meta = fetch_metadata()?;
+                let bytes = load_verified_package(&meta, ui_weak.clone())?;
 
                 let mut s = state.lock().unwrap();
                 s.stop_app();
+                s.stop_existing_app()?;
                 s.migrate_legacy_install()?;
                 s.install_from_zip_bytes(&bytes)?;
                 s.install_authority_entry_point()?;
                 s.install_shortcut()?;
-                s.save_installed_version(CURRENT_VERSION)?;
+                s.save_installed_version(&meta.version)?;
+                s.current_version = meta.version.clone();
+                let _child = s.launch()?;
                 Ok(())
             })();
 
@@ -626,6 +799,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.set_is_working(false);
                     match res {
                         Ok(_) => {
+                            let installed_version = state.lock()
+                                .map(|state| state.current_version.clone())
+                                .unwrap_or_else(|_| CURRENT_VERSION.to_string());
+                            ui.set_app_version(slint::format!("{}", installed_version));
                             ui.set_state(slint::format!("installed"));
                             ui.set_status_text(slint::format!("Repair complete."));
                         }
@@ -680,6 +857,22 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = state_clone.lock().unwrap();
         let report = s.generate_error_report();
         println!("Error Report:\n{}", report);
+    });
+
+    let ui_handle = ui.as_weak();
+    ui.on_support_clicked(move || {
+        let _ = open_url(SUPPORT_URL);
+        if let Some(ui) = ui_handle.upgrade() {
+            ui.set_status_text(slint::format!("Support opened: {}", SUPPORT_URL));
+        }
+    });
+
+    let ui_handle = ui.as_weak();
+    ui.on_install_instructions_clicked(move || {
+        let _ = open_url(INSTALL_URL);
+        if let Some(ui) = ui_handle.upgrade() {
+            ui.set_status_text(slint::format!("Install instructions opened."));
+        }
     });
 
     let run_res = ui.run();

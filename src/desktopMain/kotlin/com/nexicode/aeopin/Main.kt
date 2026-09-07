@@ -282,6 +282,13 @@ val appModule = module {
             piCols.close()
 
             if (isStagedPathNotNull || colNames.contains("rawContent") || !colNames.contains("stagedPath")) {
+                val recoveryCopy = File(
+                    dbFile.parentFile,
+                    "aeopin-recovery-${System.currentTimeMillis()}.db"
+                )
+                if (dbFile.exists()) {
+                    dbFile.copyTo(recoveryCopy, overwrite = false)
+                }
                 conn.createStatement().use { stmt ->
                     stmt.execute("DROP TABLE IF EXISTS PendingIngestion;")
                     stmt.execute("""
@@ -303,14 +310,114 @@ val appModule = module {
             addColumnIfMissing("PendingIngestion", "expectedSize", "INTEGER")
             addColumnIfMissing("PendingIngestion", "state", "TEXT NOT NULL DEFAULT 'PREPARING'")
 
+            fun tableExists(tableName: String): Boolean =
+                metadata.getTables(null, null, tableName, null).use { it.next() }
+
+            if (!tableExists("PendingIngestion")) {
+                conn.createStatement().use {
+                    it.execute(
+                        """
+                        CREATE TABLE PendingIngestion (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            type TEXT NOT NULL,
+                            stagedPath TEXT,
+                            sourcePath TEXT,
+                            expectedHash TEXT,
+                            expectedSize INTEGER,
+                            state TEXT NOT NULL,
+                            timestamp INTEGER NOT NULL
+                        )
+                        """.trimIndent()
+                    )
+                }
+            }
+
+            if (!tableExists("AeopinItems")) {
+                conn.createStatement().use {
+                    it.execute(
+                        """
+                        CREATE TABLE AeopinItems (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            type TEXT NOT NULL,
+                            originalName TEXT,
+                            originalPath TEXT,
+                            contentHash TEXT,
+                            metadataJson TEXT,
+                            timestamp INTEGER NOT NULL,
+                            isPinned INTEGER NOT NULL DEFAULT 0
+                        )
+                        """.trimIndent()
+                    )
+                }
+            }
+
+            conn.createStatement().use { statement ->
+                statement.execute(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS AeopinItemsFts USING fts5(
+                        originalName,
+                        metadataJson,
+                        content='AeopinItems',
+                        content_rowid='id'
+                    )
+                    """.trimIndent()
+                )
+                statement.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS aeopin_items_insert AFTER INSERT ON AeopinItems BEGIN
+                        INSERT INTO AeopinItemsFts(rowid, originalName, metadataJson)
+                        VALUES (new.id, new.originalName, new.metadataJson);
+                    END
+                    """.trimIndent()
+                )
+                statement.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS aeopin_items_delete AFTER DELETE ON AeopinItems BEGIN
+                        INSERT INTO AeopinItemsFts(AeopinItemsFts, rowid, originalName, metadataJson)
+                        VALUES ('delete', old.id, old.originalName, old.metadataJson);
+                    END
+                    """.trimIndent()
+                )
+                statement.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS aeopin_items_update AFTER UPDATE ON AeopinItems BEGIN
+                        INSERT INTO AeopinItemsFts(AeopinItemsFts, rowid, originalName, metadataJson)
+                        VALUES ('delete', old.id, old.originalName, old.metadataJson);
+                        INSERT INTO AeopinItemsFts(rowid, originalName, metadataJson)
+                        VALUES (new.id, new.originalName, new.metadataJson);
+                    END
+                    """.trimIndent()
+                )
+            }
+
+            val requiredObjects = listOf(
+                "AeopinItems",
+                "PendingIngestion",
+                "AeopinItemsFts",
+                "aeopin_items_insert",
+                "aeopin_items_delete",
+                "aeopin_items_update"
+            )
+            val missingObjects = requiredObjects.filterNot { objectName ->
+                conn.prepareStatement(
+                    "SELECT 1 FROM sqlite_master WHERE name = ? LIMIT 1"
+                ).use { statement ->
+                    statement.setString(1, objectName)
+                    statement.executeQuery().use { result -> result.next() }
+                }
+            }
+            if (missingObjects.isNotEmpty()) {
+                throw IllegalStateException(
+                    "AEOPIN database schema is incomplete: ${missingObjects.joinToString()}"
+                )
+            }
+
             val version = conn.createStatement().use { stmt ->
                 val rs = stmt.executeQuery("PRAGMA user_version;")
                 if (rs.next()) rs.getLong(1) else 0L
             }
             
-            val hasItemsTable = metadata.getTables(null, null, "AeopinItems", null).use { it.next() }
-            
-            if (version < 3L && hasItemsTable) {
+            if (version < 3L) {
                 conn.createStatement().use { it.execute("PRAGMA user_version = 3;") }
             }
         }
@@ -322,10 +429,7 @@ val appModule = module {
         }, 0).value ?: 0L
 
         if (currentVersion == 0L) {
-            try {
-                Database.Schema.create(driver)
-                driver.execute(null, "PRAGMA user_version = 3;", 0)
-            } catch (e: Exception) {}
+            driver.execute(null, "PRAGMA user_version = 3;", 0)
         }
         
         Database(driver)

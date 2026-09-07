@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "com.nexicode.aeopin"
-version = "1.2.0"
+version = "1.2.3"
 
 kotlin {
     jvm("desktop")
@@ -79,7 +79,7 @@ compose.desktop {
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi
             )
             packageName = "AEOPIN"
-            packageVersion = "1.2.0"
+            packageVersion = "1.2.3"
             includeAllModules = true
             // Explicitly including modules that Skia, SQLite, and JNativeHook depend on
             modules(
