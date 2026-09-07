@@ -1,5 +1,24 @@
+/*
+ * AEOPIN — Local Capture & Search
+ * Copyright (C) 2026 Aeowun
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package com.nexicode.aeopin.data.storage
 
+import com.nexicode.aeopin.data.AeopinItems
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
@@ -8,6 +27,7 @@ import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.zip.ZipInputStream
 import kotlin.io.path.exists
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.fileSize
@@ -28,7 +48,7 @@ class VaultManager(private val rootPath: String = System.getProperty("user.home"
     /**
      * Prepares a file or folder for Drag-Out by creating a temporary link or unzipping.
      */
-    fun prepareForExport(item: com.nexicode.aeopin.data.AeopinItems): File {
+    fun prepareForExport(item: AeopinItems): File {
         val hash = item.contentHash!!
         val originalName = item.originalName ?: "item"
         val source = getVaultPath(hash)
@@ -54,7 +74,7 @@ class VaultManager(private val rootPath: String = System.getProperty("user.home"
     }
 
     private fun unzip(zipFile: File, destDir: File) {
-        java.util.zip.ZipInputStream(zipFile.inputStream()).use { zis ->
+        ZipInputStream(zipFile.inputStream()).use { zis ->
             var entry = zis.nextEntry
             while (entry != null) {
                 val newFile = destDir.resolve(entry.name)

@@ -14,7 +14,7 @@
 ### UI & UX (Kotlin/Compose)
 *   `src/desktopMain/kotlin/.../aeopin/Main.kt`: Window management and the "Wink & Peek" state machine.
 *   **Window State Machine**: `ACTIVE` (center) <-> `WINKING` <-> `OFFSCREEN` <-> `PEEKING` (bottom-right).
-*   **Hotkey**: `Ctrl+Alt+V` (Windows Global Hotkey).
+*   **Hotkey**: `Alt+Shift+V` (Windows Global Hotkey).
 
 ### Tooling
 *   `src/desktopMain/kotlin/.../aeopin/tools/ReleaseTool.kt`: Automated release orchestrator. Handles builds, Velopack packaging, and GitHub deployment.

@@ -1,6 +1,25 @@
+/*
+ * AEOPIN — Local Capture & Search
+ * Copyright (C) 2026 Aeowun
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package com.nexicode.aeopin.domain
 
 import com.nexicode.aeopin.data.Database
+import com.nexicode.aeopin.data.PendingIngestion
 import com.nexicode.aeopin.data.storage.VaultManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
@@ -14,6 +33,10 @@ import kotlin.io.path.name
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.io.FileOutputStream
+import java.net.URI
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 sealed class AeopinInput {
     data class FileInput(val file: File) : AeopinInput()
@@ -90,7 +113,7 @@ class VaultService(
                     val metadata = LinkMetadata(
                         url = input.url.trim(),
                         title = input.title?.trim()?.ifBlank { null },
-                        domain = runCatching { java.net.URI(input.url.trim()).host }.getOrNull(),
+                        domain = runCatching { URI(input.url.trim()).host }.getOrNull(),
                         sourceContext = input.sourceContext?.trim()?.ifBlank { null },
                         previewText = input.previewText?.trim()?.ifBlank { null }
                     )
@@ -144,7 +167,7 @@ class VaultService(
         processPending()
     }
 
-    private fun processFileJournal(journal: com.nexicode.aeopin.data.PendingIngestion) {
+    private fun processFileJournal(journal: PendingIngestion) {
         val source = File(journal.sourcePath ?: return)
         
         when (journal.state) {
@@ -203,7 +226,7 @@ class VaultService(
         }
     }
 
-    private fun processFolderJournal(journal: com.nexicode.aeopin.data.PendingIngestion) {
+    private fun processFolderJournal(journal: PendingIngestion) {
         val source = File(journal.sourcePath ?: return)
         
         when (journal.state) {
@@ -244,20 +267,20 @@ class VaultService(
         }
     }
 
-    private fun processTextJournal(journal: com.nexicode.aeopin.data.PendingIngestion) {
+    private fun processTextJournal(journal: PendingIngestion) {
         if (journal.state == "COMPLETE") {
             queries.insertItem("TEXT", "Snippet", null, null, journal.stagedPath ?: "", journal.timestamp, false)
             queries.deleteJournal(journal.id)
         }
     }
 
-    private fun processUrlJournal(journal: com.nexicode.aeopin.data.PendingIngestion) {
+    private fun processUrlJournal(journal: PendingIngestion) {
         if (journal.state == "COMPLETE") {
             val stored = journal.stagedPath?.trim().orEmpty()
             val metadata = runCatching {
                 json.decodeFromString<LinkMetadata>(stored)
             }.getOrElse {
-                val uri = java.net.URI(stored)
+                val uri = URI(stored)
                 LinkMetadata(url = stored, domain = uri.host)
             }
             queries.insertItem(
@@ -274,11 +297,11 @@ class VaultService(
     }
 
     private fun zipFolder(sourceDir: File, targetZip: File) {
-        java.util.zip.ZipOutputStream(java.io.FileOutputStream(targetZip)).use { zos ->
+        ZipOutputStream(FileOutputStream(targetZip)).use { zos ->
             sourceDir.walkTopDown().forEach { file ->
                 if (file.isFile) {
                     val entryName = sourceDir.toPath().relativize(file.toPath()).toString()
-                    val entry = java.util.zip.ZipEntry(entryName)
+                    val entry = ZipEntry(entryName)
                     zos.putNextEntry(entry)
                     file.inputStream().use { it.copyTo(zos) }
                     zos.closeEntry()

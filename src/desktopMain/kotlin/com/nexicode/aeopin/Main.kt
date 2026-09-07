@@ -1,3 +1,21 @@
+/*
+ * AEOPIN — Local Capture & Search
+ * Copyright (C) 2026 Aeowun
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package com.nexicode.aeopin
 
 import androidx.compose.animation.*
@@ -20,12 +38,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.*
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.painter.ColorPainter
+import app.cash.sqldelight.db.QueryResult
 import com.nexicode.aeopin.data.Database
 import com.nexicode.aeopin.data.settings.SettingsManager
 import com.nexicode.aeopin.data.storage.VaultManager
@@ -44,6 +64,9 @@ import java.awt.dnd.DropTarget
 import java.io.File
 import java.util.Properties
 import kotlinx.coroutines.*
+import java.net.ServerSocket
+import java.sql.DatabaseMetaData
+import java.sql.DriverManager
 
 sealed class UiStorageState {
     object Idle : UiStorageState()
@@ -57,7 +80,7 @@ fun main() {
         application {
             // SINGLE INSTANCE LOCK
             val lockSocket = try {
-                java.net.ServerSocket(49152)
+                ServerSocket(49152)
             } catch (e: Exception) {
                 return@application
             }
@@ -96,7 +119,6 @@ fun main() {
                     winkProgress.animateTo(1f, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow))
                 } else {
                     winkProgress.animateTo(0f, tween(250, easing = FastOutSlowInEasing))
-                    windowActive = false
                 }
             }
 
@@ -169,7 +191,7 @@ fun main() {
                                     scaleY = winkProgress.value
                                     alpha = winkProgress.value
                                     scaleX = 0.95f + (0.05f * winkProgress.value)
-                                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin.Center
+                                    transformOrigin = TransformOrigin.Center
                                 }
                                 .border(
                                     width = 1.dp,
@@ -236,7 +258,7 @@ fun main() {
         }
     } catch (e: Throwable) {
         e.printStackTrace()
-        java.lang.System.exit(1)
+        System.exit(1)
     }
 }
 
@@ -250,7 +272,7 @@ val appModule = module {
         if (!dbFile.parentFile.exists()) dbFile.parentFile.mkdirs()
         val url = "jdbc:sqlite:${dbFile.absolutePath}"
         
-        java.sql.DriverManager.getConnection(url).use { conn ->
+        DriverManager.getConnection(url).use { conn ->
             val metadata = conn.metaData
 
             fun addColumnIfMissing(tableName: String, columnName: String, type: String) {
@@ -275,7 +297,7 @@ val appModule = module {
             while(piCols.next()) {
                 val name = piCols.getString("COLUMN_NAME")
                 colNames.add(name)
-                if (name == "stagedPath" && piCols.getInt("NULLABLE") == java.sql.DatabaseMetaData.columnNoNulls) {
+                if (name == "stagedPath" && piCols.getInt("NULLABLE") == DatabaseMetaData.columnNoNulls) {
                     isStagedPathNotNull = true
                 }
             }
@@ -424,8 +446,8 @@ val appModule = module {
 
         val driver = JdbcSqliteDriver(url, Properties())
         val currentVersion = driver.executeQuery(null, "PRAGMA user_version;", { cursor ->
-            if (cursor.next().value) app.cash.sqldelight.db.QueryResult.Value(cursor.getLong(0)) 
-            else app.cash.sqldelight.db.QueryResult.Value(0L)
+            if (cursor.next().value) QueryResult.Value(cursor.getLong(0))
+            else QueryResult.Value(0L)
         }, 0).value ?: 0L
 
         if (currentVersion == 0L) {

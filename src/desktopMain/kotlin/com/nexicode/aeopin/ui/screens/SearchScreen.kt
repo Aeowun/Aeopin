@@ -1,7 +1,26 @@
+/*
+ * AEOPIN — Local Capture & Search
+ * Copyright (C) 2026 Aeowun
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package com.nexicode.aeopin.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -27,6 +46,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -40,6 +60,7 @@ import com.nexicode.aeopin.ui.theme.AeopinTurquoise
 import com.nexicode.aeopin.ui.theme.AeopinDeepSlate
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
+import com.nexicode.aeopin.data.DatabaseQueries
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.map
 import org.koin.compose.koinInject
@@ -63,6 +84,7 @@ import java.awt.event.MouseEvent
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.awt.Component
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -70,7 +92,7 @@ fun SearchScreen(
     modifier: Modifier = Modifier,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
-    window: java.awt.Component
+    window: Component
 ) {
     val database = koinInject<Database>()
     val vaultManager = koinInject<VaultManager>()
@@ -101,7 +123,7 @@ fun SearchScreen(
                             deleteItemPermanently(item, queries, vaultManager)
                         }
                         // Delayed cleanup to ensure OS has finished with the file/folder
-                        java.util.Timer().schedule(object : java.util.TimerTask() {
+                        Timer().schedule(object : TimerTask() {
                             override fun run() {
                                 if (file.exists()) {
                                     if (file.isDirectory) file.deleteRecursively() else file.delete()
@@ -157,7 +179,7 @@ fun SearchScreen(
                 modifier = Modifier.fillMaxWidth().height(44.dp),
                 shape = RoundedCornerShape(10.dp),
                 color = AeopinTurquoise.copy(alpha = 0.03f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, AeopinTurquoise.copy(alpha = 0.1f))
+                border = BorderStroke(1.dp, AeopinTurquoise.copy(alpha = 0.1f))
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -277,7 +299,7 @@ private fun openItem(item: AeopinItems, vaultManager: VaultManager) {
     } catch (e: Exception) { e.printStackTrace() }
 }
 
-private fun deleteItemPermanently(item: AeopinItems, queries: com.nexicode.aeopin.data.DatabaseQueries, vaultManager: VaultManager) {
+private fun deleteItemPermanently(item: AeopinItems, queries: DatabaseQueries, vaultManager: VaultManager) {
     queries.deleteItem(item.id)
     if ((item.type == "FILE" || item.type == "FOLDER") && item.contentHash != null) {
         val path = vaultManager.getVaultPath(item.contentHash)
@@ -335,7 +357,7 @@ fun AeopinItemRow(
     onOpen: () -> Unit,
     vaultManager: VaultManager,
     onDeletePermanently: () -> Unit,
-    window: java.awt.Component,
+    window: Component,
     onDragStarted: (AeopinItems) -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -349,7 +371,7 @@ fun AeopinItemRow(
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()
-                        if (event.type == androidx.compose.ui.input.pointer.PointerEventType.Press) {
+                        if (event.type == PointerEventType.Press) {
                             onDragStarted(item)
                         }
                     }

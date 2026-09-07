@@ -8,6 +8,18 @@ All notable AEOPIN changes are documented here.
 - **Authority Recovery Logic**: Implemented transaction-based installation recovery and payload validation.
 - **Process Management**: Integrated force-stop and active monitoring for the managed application process.
 - **Migration**: Added automatic migration for legacy installations in common Windows paths.
+- **UI Lifecycle**: Fixed an issue where the hotkey could cause the application to exit prematurely.
+
+## [1.2.2] - 2026-09-06
+
+### Fixed
+
+- Launch now checks the release manifest first and repairs or updates the managed payload before starting it.
+- Managed payloads carry a verified version marker; the Authority refuses to launch a missing or mismatched executable.
+- Process shutdown waits for older AEOPIN processes to disappear instead of assuming `taskkill` completed.
+- Install, update, and repair launch the verified payload only after the replacement succeeds.
+- Authority failures now offer direct support and install-instruction links.
+- Database bootstrap validates required tables, FTS objects, and triggers, and preserves a recovery copy before destructive journal repair.
 
 ## [1.2.1] - 2026-09-05
 
@@ -20,17 +32,6 @@ All notable AEOPIN changes are documented here.
 - Legacy installed application directories are migrated before the new payload is extracted.
 - The Authority helper functions now compile correctly in release and test builds.
 - README and release metadata identify the corrected installer build.
-
-## [1.2.2] - 2026-09-06
-
-### Fixed
-
-- Launch now checks the release manifest first and repairs or updates the managed payload before starting it.
-- Managed payloads carry a verified version marker; the Authority refuses to launch a missing or mismatched executable.
-- Process shutdown waits for older AEOPIN processes to disappear instead of assuming `taskkill` completed.
-- Install, update, and repair launch the verified payload only after the replacement succeeds.
-- Authority failures now offer direct support and install-instruction links.
-- Database bootstrap validates required tables, FTS objects, and triggers, and preserves a recovery copy before destructive journal repair.
 
 ## [1.2.0] - 2026-09-05
 
