@@ -1,0 +1,91 @@
+import kotlin.Boolean;
+
+-- Durable Ingestion Journal
+CREATE TABLE PendingIngestion (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL, -- 'FILE', 'FOLDER', 'TEXT', 'URL'
+    stagedPath TEXT,    -- Path in AEOPIN staging
+    sourcePath TEXT,    -- Path of the original user file
+    expectedHash TEXT,
+    expectedSize INTEGER,
+    state TEXT NOT NULL, -- 'PREPARING', 'STAGED', 'VERIFIED', 'VAULT_COMMITTED', 'DELETE_PENDING'
+    timestamp INTEGER NOT NULL
+);
+
+-- Final processed items
+CREATE TABLE AeopinItems (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    originalName TEXT,
+    originalPath TEXT,
+    contentHash TEXT,
+    metadataJson TEXT,
+    timestamp INTEGER NOT NULL,
+    isPinned INTEGER AS Boolean NOT NULL DEFAULT 0
+);
+
+-- Search Index
+CREATE VIRTUAL TABLE AeopinItemsFts USING fts5(
+    originalName,
+    metadataJson,
+    content='AeopinItems',
+    content_rowid='id'
+);
+
+-- Triggers for FTS consistency
+CREATE TRIGGER aeopin_items_insert AFTER INSERT ON AeopinItems BEGIN
+  INSERT INTO AeopinItemsFts(rowid, originalName, metadataJson)
+  VALUES (new.id, new.originalName, new.metadataJson);
+END;
+
+CREATE TRIGGER aeopin_items_delete AFTER DELETE ON AeopinItems BEGIN
+  INSERT INTO AeopinItemsFts(AeopinItemsFts, rowid, originalName, metadataJson)
+  VALUES ('delete', old.id, old.originalName, old.metadataJson);
+END;
+
+CREATE TRIGGER aeopin_items_update AFTER UPDATE ON AeopinItems BEGIN
+  INSERT INTO AeopinItemsFts(AeopinItemsFts, rowid, originalName, metadataJson)
+  VALUES ('delete', old.id, old.originalName, old.metadataJson);
+  INSERT INTO AeopinItemsFts(rowid, originalName, metadataJson)
+  VALUES (new.id, new.originalName, new.metadataJson);
+END;
+
+-- Queries
+insertJournal:
+INSERT INTO PendingIngestion (type, stagedPath, sourcePath, expectedSize, state, timestamp)
+VALUES (?, ?, ?, ?, ?, ?);
+
+updateJournalState:
+UPDATE PendingIngestion SET state = ? WHERE id = ?;
+
+updateJournalStagedInfo:
+UPDATE PendingIngestion SET stagedPath = ?, expectedHash = ?, state = ? WHERE id = ?;
+
+deleteJournal:
+DELETE FROM PendingIngestion WHERE id = ?;
+
+selectAllPending:
+SELECT * FROM PendingIngestion;
+
+insertItem:
+INSERT INTO AeopinItems (type, originalName, originalPath, contentHash, metadataJson, timestamp, isPinned)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+deleteItem:
+DELETE FROM AeopinItems WHERE id = ?;
+
+togglePinned:
+UPDATE AeopinItems SET isPinned = ? WHERE id = ?;
+
+search:
+SELECT AeopinItems.*
+FROM AeopinItems
+JOIN AeopinItemsFts ON AeopinItems.id = AeopinItemsFts.rowid
+WHERE AeopinItemsFts MATCH :query
+ORDER BY isPinned DESC, AeopinItems.timestamp DESC;
+
+selectAllItems:
+SELECT * FROM AeopinItems ORDER BY isPinned DESC, timestamp DESC;
+
+filterByType:
+SELECT * FROM AeopinItems WHERE type = ? ORDER BY isPinned DESC, timestamp DESC;

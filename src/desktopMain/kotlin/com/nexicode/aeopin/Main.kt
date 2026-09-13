@@ -1,0 +1,522 @@
+/*
+ * AEOPIN — Local Capture & Search
+ * Copyright (C) 2026 Aeowun
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+package com.nexicode.aeopin
+
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.window.WindowDraggableArea
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.*
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.painter.ColorPainter
+import app.cash.sqldelight.db.QueryResult
+import com.nexicode.aeopin.data.Database
+import com.nexicode.aeopin.data.settings.SettingsManager
+import com.nexicode.aeopin.data.storage.VaultManager
+import com.nexicode.aeopin.domain.VaultService
+import com.nexicode.aeopin.ui.DesktopDropAdapter
+import com.nexicode.aeopin.ui.GlobalHotkeyManager
+import com.nexicode.aeopin.ui.screens.SearchScreen
+import com.nexicode.aeopin.ui.theme.AeopinTheme
+import com.nexicode.aeopin.ui.theme.AeopinTurquoise
+import com.nexicode.aeopin.ui.theme.AeopinMidnight
+import com.nexicode.aeopin.ui.theme.AeopinDeepSlate
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import org.koin.core.context.startKoin
+import org.koin.dsl.module
+import java.awt.dnd.DropTarget
+import java.io.File
+import java.util.Properties
+import kotlinx.coroutines.*
+import java.net.ServerSocket
+import java.sql.DatabaseMetaData
+import java.sql.DriverManager
+
+sealed class UiStorageState {
+    object Idle : UiStorageState()
+    object Dragging : UiStorageState()
+    data class Success(val name: String) : UiStorageState()
+    data class Error(val message: String) : UiStorageState()
+}
+
+fun main() {
+    try {
+        application {
+            // SINGLE INSTANCE LOCK
+            val lockSocket = try {
+                ServerSocket(49152)
+            } catch (e: Exception) {
+                return@application
+            }
+
+            val koinApp = remember {
+                startKoin {
+                    modules(appModule)
+                }
+            }
+            
+            val vaultService = koinApp.koin.get<VaultService>()
+            val settingsManager = koinApp.koin.get<SettingsManager>()
+
+            var isVisible by remember { mutableStateOf(true) }
+            var windowActive by remember { mutableStateOf(true) }
+            var storageState by remember { mutableStateOf<UiStorageState>(UiStorageState.Idle) }
+            var searchQuery by remember { mutableStateOf("") }
+            val scope = rememberCoroutineScope()
+
+            val hotkeyManager = remember { GlobalHotkeyManager { isVisible = !isVisible } }
+
+            LaunchedEffect(Unit) {
+                vaultService.startScavenger()
+                hotkeyManager.init()
+            }
+
+            DisposableEffect(hotkeyManager) {
+                onDispose { hotkeyManager.stop() }
+            }
+
+            // THE "WINK" ANIMATION (Vertical Shrink)
+            val winkProgress = remember { Animatable(0f) }
+            LaunchedEffect(isVisible) {
+                if (isVisible) {
+                    windowActive = true
+                    winkProgress.animateTo(1f, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow))
+                } else {
+                    winkProgress.animateTo(0f, tween(250, easing = FastOutSlowInEasing))
+                }
+            }
+
+            Tray(
+                icon = painterResource("icon.ico"),
+                tooltip = "DROP",
+                onAction = { isVisible = true },
+                menu = {
+                    Item("Show", onClick = { isVisible = true })
+                    Item("Exit", onClick = { exitApplication() })
+                }
+            )
+
+            if (windowActive) {
+                Dialog(
+                    onCloseRequest = { isVisible = false },
+                    state = rememberDialogState(
+                        width = 340.dp,
+                        height = 520.dp,
+                        position = WindowPosition(Alignment.Center)
+                    ),
+                    title = "DROP",
+                    undecorated = true,
+                    transparent = true,
+                    resizable = false
+                ) {
+                    // Dialogs are hidden from taskbar by default on Windows
+                    LaunchedEffect(window) {
+                        window.isAlwaysOnTop = true
+                    }
+
+                    val windowInfo = LocalWindowInfo.current
+                    val isFocused = windowInfo.isWindowFocused
+                    val isDraggingOver = storageState is UiStorageState.Dragging
+                    
+                    val opacity by animateFloatAsState(
+                        targetValue = if (isFocused || isDraggingOver) 1.0f else 0.95f,
+                        animationSpec = tween(200)
+                    )
+
+                    LaunchedEffect(window) {
+                        DropTarget(window, DesktopDropAdapter(
+                            vaultService = vaultService,
+                            scope = scope,
+                            onDragStateChange = { if (it) storageState = UiStorageState.Dragging else if (storageState == UiStorageState.Dragging) storageState = UiStorageState.Idle },
+                            onStorageStarted = { },
+                            onStorageSuccess = { label ->
+                                scope.launch {
+                                    storageState = UiStorageState.Success(label)
+                                    delay(2000)
+                                    storageState = UiStorageState.Idle
+                                }
+                            },
+                            onStorageError = { msg ->
+                                scope.launch {
+                                    storageState = UiStorageState.Error(msg)
+                                    delay(3000)
+                                    storageState = UiStorageState.Idle
+                                }
+                            }
+                        ))
+                    }
+
+                    AeopinTheme {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    // VERTICAL WINK EFFECT
+                                    scaleY = winkProgress.value
+                                    alpha = winkProgress.value
+                                    scaleX = 0.95f + (0.05f * winkProgress.value)
+                                    transformOrigin = TransformOrigin.Center
+                                }
+                                .border(
+                                    width = 1.dp,
+                                    brush = Brush.verticalGradient(
+                                        listOf(
+                                            if (isFocused) AeopinTurquoise.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.12f),
+                                            Color.Transparent
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clip(RoundedCornerShape(12.dp)),
+                            color = AeopinMidnight.copy(alpha = opacity)
+                        ) {
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                WindowDraggableArea {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(44.dp)
+                                            .padding(horizontal = 16.dp),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(12.dp)
+                                                    .background(AeopinTurquoise, CircleShape)
+                                                    .shadow(6.dp, CircleShape)
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text(
+                                                "DROP",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = Color.White.copy(alpha = 0.5f)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 16.dp)
+                                        .padding(bottom = 16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    StorageAppliance(storageState)
+                                    
+                                    Spacer(modifier = Modifier.height(28.dp))
+                                    
+                                    SearchScreen(
+                                        modifier = Modifier.weight(1f),
+                                        searchQuery = searchQuery,
+                                        onSearchQueryChange = { searchQuery = it },
+                                        window = window
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } catch (e: Throwable) {
+        e.printStackTrace()
+        System.exit(1)
+    }
+}
+
+val appModule = module {
+    val vaultPath = System.getProperty("aeopin.data.dir") 
+        ?: System.getenv("AEOPIN_DATA_DIR")
+        ?: (System.getProperty("user.home") + "/Documents/AEOPIN")
+        
+    single<Database> {
+        val dbFile = File(vaultPath, "aeopin.db")
+        if (!dbFile.parentFile.exists()) dbFile.parentFile.mkdirs()
+        val url = "jdbc:sqlite:${dbFile.absolutePath}"
+        
+        DriverManager.getConnection(url).use { conn ->
+            val metadata = conn.metaData
+
+            fun addColumnIfMissing(tableName: String, columnName: String, type: String) {
+                val rs = metadata.getColumns(null, null, tableName, columnName)
+                val exists = rs.next()
+                rs.close()
+                if (!exists) {
+                    val tables = metadata.getTables(null, null, tableName, null)
+                    if (tables.next()) {
+                        conn.createStatement().use { it.execute("ALTER TABLE $tableName ADD COLUMN $columnName $type;") }
+                    }
+                    tables.close()
+                }
+            }
+
+            addColumnIfMissing("AeopinItems", "isPinned", "INTEGER NOT NULL DEFAULT 0")
+            addColumnIfMissing("AeopinItems", "originalPath", "TEXT")
+
+            val piCols = metadata.getColumns(null, null, "PendingIngestion", null)
+            val colNames = mutableSetOf<String>()
+            var isStagedPathNotNull = false
+            while(piCols.next()) {
+                val name = piCols.getString("COLUMN_NAME")
+                colNames.add(name)
+                if (name == "stagedPath" && piCols.getInt("NULLABLE") == DatabaseMetaData.columnNoNulls) {
+                    isStagedPathNotNull = true
+                }
+            }
+            piCols.close()
+
+            if (isStagedPathNotNull || colNames.contains("rawContent") || !colNames.contains("stagedPath")) {
+                val recoveryCopy = File(
+                    dbFile.parentFile,
+                    "aeopin-recovery-${System.currentTimeMillis()}.db"
+                )
+                if (dbFile.exists()) {
+                    dbFile.copyTo(recoveryCopy, overwrite = false)
+                }
+                conn.createStatement().use { stmt ->
+                    stmt.execute("DROP TABLE IF EXISTS PendingIngestion;")
+                    stmt.execute("""
+                        CREATE TABLE PendingIngestion (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            type TEXT NOT NULL,
+                            stagedPath TEXT,
+                            sourcePath TEXT,
+                            expectedHash TEXT,
+                            expectedSize INTEGER,
+                            state TEXT NOT NULL,
+                            timestamp INTEGER NOT NULL
+                        );
+                    """.trimIndent())
+                }
+            }
+
+            addColumnIfMissing("PendingIngestion", "expectedHash", "TEXT")
+            addColumnIfMissing("PendingIngestion", "expectedSize", "INTEGER")
+            addColumnIfMissing("PendingIngestion", "state", "TEXT NOT NULL DEFAULT 'PREPARING'")
+
+            fun tableExists(tableName: String): Boolean =
+                metadata.getTables(null, null, tableName, null).use { it.next() }
+
+            if (!tableExists("PendingIngestion")) {
+                conn.createStatement().use {
+                    it.execute(
+                        """
+                        CREATE TABLE PendingIngestion (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            type TEXT NOT NULL,
+                            stagedPath TEXT,
+                            sourcePath TEXT,
+                            expectedHash TEXT,
+                            expectedSize INTEGER,
+                            state TEXT NOT NULL,
+                            timestamp INTEGER NOT NULL
+                        )
+                        """.trimIndent()
+                    )
+                }
+            }
+
+            if (!tableExists("AeopinItems")) {
+                conn.createStatement().use {
+                    it.execute(
+                        """
+                        CREATE TABLE AeopinItems (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            type TEXT NOT NULL,
+                            originalName TEXT,
+                            originalPath TEXT,
+                            contentHash TEXT,
+                            metadataJson TEXT,
+                            timestamp INTEGER NOT NULL,
+                            isPinned INTEGER NOT NULL DEFAULT 0
+                        )
+                        """.trimIndent()
+                    )
+                }
+            }
+
+            conn.createStatement().use { statement ->
+                statement.execute(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS AeopinItemsFts USING fts5(
+                        originalName,
+                        metadataJson,
+                        content='AeopinItems',
+                        content_rowid='id'
+                    )
+                    """.trimIndent()
+                )
+                statement.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS aeopin_items_insert AFTER INSERT ON AeopinItems BEGIN
+                        INSERT INTO AeopinItemsFts(rowid, originalName, metadataJson)
+                        VALUES (new.id, new.originalName, new.metadataJson);
+                    END
+                    """.trimIndent()
+                )
+                statement.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS aeopin_items_delete AFTER DELETE ON AeopinItems BEGIN
+                        INSERT INTO AeopinItemsFts(AeopinItemsFts, rowid, originalName, metadataJson)
+                        VALUES ('delete', old.id, old.originalName, old.metadataJson);
+                    END
+                    """.trimIndent()
+                )
+                statement.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS aeopin_items_update AFTER UPDATE ON AeopinItems BEGIN
+                        INSERT INTO AeopinItemsFts(AeopinItemsFts, rowid, originalName, metadataJson)
+                        VALUES ('delete', old.id, old.originalName, old.metadataJson);
+                        INSERT INTO AeopinItemsFts(rowid, originalName, metadataJson)
+                        VALUES (new.id, new.originalName, new.metadataJson);
+                    END
+                    """.trimIndent()
+                )
+            }
+
+            val requiredObjects = listOf(
+                "AeopinItems",
+                "PendingIngestion",
+                "AeopinItemsFts",
+                "aeopin_items_insert",
+                "aeopin_items_delete",
+                "aeopin_items_update"
+            )
+            val missingObjects = requiredObjects.filterNot { objectName ->
+                conn.prepareStatement(
+                    "SELECT 1 FROM sqlite_master WHERE name = ? LIMIT 1"
+                ).use { statement ->
+                    statement.setString(1, objectName)
+                    statement.executeQuery().use { result -> result.next() }
+                }
+            }
+            if (missingObjects.isNotEmpty()) {
+                throw IllegalStateException(
+                    "AEOPIN database schema is incomplete: ${missingObjects.joinToString()}"
+                )
+            }
+
+            val version = conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery("PRAGMA user_version;")
+                if (rs.next()) rs.getLong(1) else 0L
+            }
+            
+            if (version < 3L) {
+                conn.createStatement().use { it.execute("PRAGMA user_version = 3;") }
+            }
+        }
+
+        val driver = JdbcSqliteDriver(url, Properties())
+        val currentVersion = driver.executeQuery(null, "PRAGMA user_version;", { cursor ->
+            if (cursor.next().value) QueryResult.Value(cursor.getLong(0))
+            else QueryResult.Value(0L)
+        }, 0).value ?: 0L
+
+        if (currentVersion == 0L) {
+            driver.execute(null, "PRAGMA user_version = 3;", 0)
+        }
+        
+        Database(driver)
+    }
+    single { VaultManager(vaultPath) }
+    single { SettingsManager(vaultPath) }
+    single { VaultService(get(), get(), CoroutineScope(Dispatchers.IO + SupervisorJob())) }
+}
+
+@Composable
+fun StorageAppliance(state: UiStorageState) {
+    val isDragging = state is UiStorageState.Dragging
+    val isSuccess = state is UiStorageState.Success
+    val isError = state is UiStorageState.Error
+    
+    val lift by animateDpAsState(if (isDragging) 12.dp else 0.dp, tween(200))
+    val scale by animateFloatAsState(if (isDragging) 1.05f else 1.0f, tween(250, easing = FastOutSlowInEasing))
+    val ambientGlow by animateColorAsState(
+        targetValue = when {
+            isDragging -> AeopinTurquoise.copy(alpha = 0.15f)
+            isSuccess -> Color.Green.copy(alpha = 0.1f)
+            isError -> Color.Red.copy(alpha = 0.1f)
+            else -> Color.Transparent
+        }
+    )
+
+    Box(
+        modifier = Modifier
+            .size(140.dp)
+            .graphicsLayer {
+                translationY = -lift.toPx()
+                scaleX = scale
+                scaleY = scale
+            }
+            .background(ambientGlow, CircleShape)
+            .border(1.dp, Color.White.copy(alpha = 0.08f), CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        // Visual indicator of state
+        when (state) {
+            is UiStorageState.Dragging -> {
+                Icon(Icons.Default.Check, null, modifier = Modifier.size(48.dp), tint = AeopinTurquoise.copy(alpha = 0.4f))
+            }
+            is UiStorageState.Success -> {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Check, null, modifier = Modifier.size(40.dp), tint = Color.Green)
+                    Text("SAVED", style = MaterialTheme.typography.labelSmall, color = Color.Green)
+                }
+            }
+            is UiStorageState.Error -> {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("FAIL", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.error)
+                    Text(state.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+            else -> {
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .background(
+                            Brush.radialGradient(listOf(AeopinTurquoise.copy(alpha = 0.12f), Color.Transparent)),
+                            CircleShape
+                        )
+                )
+            }
+        }
+    }
+}

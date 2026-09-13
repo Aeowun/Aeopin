@@ -1,0 +1,10 @@
+# Aeopin ignore
+.git/
+.gradle/
+build/
+authority/target/
+local.properties
+icon.ico
+*.log
+.idea/
+.vscode/
