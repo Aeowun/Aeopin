@@ -1,5 +1,6 @@
 ﻿{
-    "version":  "1.2.3",
-    "url":  "https://github.com/Aeowun/Aeopin/releases/download/v1.2.3/aeopin-portable.zip",
-    "sha256":  "7bc52453ac6f4c5badc0c520974aec1b3d536957c48a4161f6bea1e7d9c6157f"
+  "version": "1.2.3",
+  "url": "https://github.com/Aeowun/Aeopin/releases/download/v1.2.3/aeopin-portable.zip",
+  "sha256": "7bc52453ac6f4c5badc0c520974aec1b3d536957c48a4161f6bea1e7d9c6157f",
+  "signature": "e4ff914d8d04d1f7af9669420d568295dc8cb4645c2dc5aa48127e4b40682a6f29df3eec74aeb4409c2b3eced05af11cbdc8217f011a6c7a829f2d73f0dca106"
 }
