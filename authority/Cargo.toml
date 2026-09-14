@@ -17,6 +17,9 @@ zip = "2.2"
 
 # File hashing
 sha2 = "0.10"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+hex = "0.4"
+rand = "0.8"
 
 # Windows Integration
 windows = { version = "0.58", features = [
