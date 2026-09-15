@@ -2,7 +2,7 @@
 .git/
 .gradle/
 build/
-authority/target/
+legacy/
 local.properties
 icon.ico
 *.log

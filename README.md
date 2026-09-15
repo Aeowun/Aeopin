@@ -12,8 +12,9 @@ AEOPIN is a capture tool. Drop a file, folder, text, or link into the capture wi
 *   Windows 10 or 11.
 
 ### Installation
-1.  Download `aeopin-authority.exe` from the latest release.
-2.  Run the executable. It installs the application to your machine and creates a desktop shortcut.
+1.  Download `Aeopin-portable.zip` from the latest release.
+2.  Extract the ZIP to a folder of your choice.
+3.  Run `Aeopin.exe`.
 
 ### Usage
 *   **Show/Hide**: Press `Alt+Shift+V` to toggle the capture window.
@@ -23,4 +24,3 @@ AEOPIN is a capture tool. Drop a file, folder, text, or link into the capture wi
 
 ### Build from source
 *   Build the portable distribution: `.\gradlew.bat zipDistributable`
-*   Build the Authority entry point: `cd authority` then `cargo build --release`

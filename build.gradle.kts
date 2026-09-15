@@ -78,7 +78,7 @@ compose.desktop {
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe, 
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi
             )
-            packageName = "AEOPIN"
+            packageName = "Aeopin"
             packageVersion = "1.2.3"
             includeAllModules = true
             // Explicitly including modules that Skia, SQLite, and JNativeHook depend on
@@ -111,8 +111,8 @@ compose.desktop {
 
 tasks.register<Zip>("zipDistributable") {
     group = "package"
-    from("build/compose/binaries/main/app/AEOPIN")
-    archiveFileName.set("aeopin-portable.zip")
+    from("build/compose/binaries/main/app/Aeopin")
+    archiveFileName.set("Aeopin-portable.zip")
     destinationDirectory.set(layout.buildDirectory.dir("distributions"))
     dependsOn("createDistributable")
 }
