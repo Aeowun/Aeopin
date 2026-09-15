@@ -2,12 +2,21 @@
 
 All notable AEOPIN changes are documented here.
 
-## [1.2.4] - 2026-09-14
+## [1.3.0] - 2026-09-14
 
 ### Changed
-- **Removed Authority**: The Rust Authority lifecycle manager has been retired and moved to legacy storage.
-- **New Release Model**: AEOPIN is now distributed as a portable ZIP containing `Aeopin.exe`.
-- **Standalone Application**: The Kotlin/Compose application now handles its own lifecycle without an external manager.
+
+* **Direct Application Release**: AEOPIN is now distributed directly as the Windows application rather than through the AEOPIN Authority installer/launcher.
+* **Authority Retired**: The Authority release path has been removed from the active AEOPIN code, packaging, and distribution flow. Its implementation is retained locally as unreleased legacy code.
+* **Portable Package**: The portable distribution now includes the required `AEOPIN.version` marker at the package root.
+* **Release Packaging**: Packaging and distribution now target the AEOPIN application directly.
+
+### Removed
+
+* Authority-based installation and update flow from the active release.
+* Authority executable from release assets.
+* Authority-dependent release metadata and distribution requirements.
+
 
 ## [1.2.3] - 2026-09-06
 
